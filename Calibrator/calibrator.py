@@ -1,7 +1,10 @@
 import os
 import cv2
+import numpy as np
 import time
 import pickle
+
+import pdb
 
 from visdom import Visdom
 
@@ -16,7 +19,8 @@ def extract_and_refine_checkboard(img, isBGR,
     # return None if the image is NULL
     # return corners: num x 1 x 2
     '''
-    if not img:
+
+    if img is None:
         print "Warning: input image is NULL!"
         return None
 
@@ -63,13 +67,13 @@ def extract_and_refine_checkboard(img, isBGR,
     
     # check if corner is at the border   
     one_check_on_border = False
+    corner_count = corners.shape[0]
     for i in range(corner_count):
         x, y = corners[i, 0]
-        if x < border_width or x >= w - border_width or
+        if x < border_width or x >= w - border_width or \
                     y < border_width or y >= h - border_width:
             one_check_on_border = True
     if one_check_on_border: return None
-
 
     #  check corners
     point_num_per_image = (checkboard_size_height-1)*(checkboard_size_width-1)
@@ -85,7 +89,7 @@ def calculate_intrinsics_given_corners(image_corners_list,
             checkboard_size_width, checkboard_size_height,
             image_size_width, image_size_height,
             cell_width, cell_height, 
-            MAX_VIEW_NUMBER_USED=150)
+            MAX_VIEW_NUMBER_USED=150):
     '''
     return intrinsics, distort_coef, error
     '''
@@ -105,7 +109,6 @@ def calculate_intrinsics_given_corners(image_corners_list,
         print "Warning: only {} views are used (total:{})!".format(MAX_VIEW_NUMBER_USED, image_count) 
         image_count = MAX_VIEW_NUMBER_USED
 
-    # TODO
     object_points_one_image = np.zeros((point_num_per_image, 3), np.float32)
     object_points_one_image[:,:2] = np.mgrid[0:(checkboard_size_width-1), 0:(checkboard_size_height-1)].T.reshape(-1,2)
     object_points_one_image[:, 0] *= cell_width
@@ -142,16 +145,13 @@ def generate_intrinsics(image_base_name, start_idx, end_idx, step,
                 "corner_basename need to be set"
 
     if show_checkboard and not wait_for_key:
-        viz = Visdom(port=8097)
-        assert viz.check_connection(timeout_seconds=3), \
-            'No connection could be formed quickly'
-        checkboard_win = viz.image( np.random.rand(3, 512, 256),
+        viz = Visdom(port=8095)
+        checkboard_win = viz.image( np.random.rand(3, image_size_height, image_size_width),
             opts=dict(title='CheckerBoard', caption='Random'))
 
     #################################################
     # Detect the checkboard from all the input images
-    image_points_mats=[]
-
+    image_points_list = []
     for idx in range(start_idx, end_idx, step):
         print "Reading Image: {0:05d}".format(idx)
         name = image_base_name.format(idx)
@@ -175,17 +175,17 @@ def generate_intrinsics(image_base_name, start_idx, end_idx, step,
                 bFastCheck=bFastCheck)
 
         if image_points is None:
-            print "Warning: No checkboard is detected in the {}-th image!".format(i)
+            print "Warning: No checkboard is detected in the {}-th image!".format(idx)
 
             # save corners even when image_points is None
             if save_corners and bSaveNullImageCorners:            
-                name = corner_basename.format(i)
+                name = corner_basename.format(idx)
                 with open(name, "wb") as fp:   
                     pickle.dump(image_points, fp)
 
             if show_checkboard:
-                checkboard_win = viz.image( img, win=checkboard_win,
-                opts=dict(title='CheckerBoard', caption='{}-th image. No checkboard is detected.'.format(i)))
+                checkboard_win = viz.image( img.transpose(2, 0, 1)[::-1], win=checkboard_win,
+                opts=dict(title='CheckerBoard', caption='{}-th image. No checkboard is detected.'.format(idx)))
                 time.sleep(wait_time)
 
             del img; continue
@@ -194,10 +194,10 @@ def generate_intrinsics(image_base_name, start_idx, end_idx, step,
 
         if show_checkboard:
             
-            cv2.drawChessboardCorners(img, (checkboard_size_width-1, checkboard_size_height-1), corners, True)
+            cv2.drawChessboardCorners(img, (checkboard_size_width-1, checkboard_size_height-1), image_points, True)
 
-            checkboard_win = viz.image( img, win=checkboard_win,
-                opts=dict(title='CheckerBoard', caption='{}-th image'.format(i)))
+            checkboard_win = viz.image( img.transpose(2, 0, 1)[::-1] , win=checkboard_win,
+                opts=dict(title='CheckerBoard', caption='{}-th image'.format(idx)))
 
             if wait_for_key:
                 raw_input("")
@@ -207,26 +207,26 @@ def generate_intrinsics(image_base_name, start_idx, end_idx, step,
         if save_checkerboardImg and out_basename is not None:
             if not show_checkboard: 
                 cv2.drawChessboardCorners(img, (checkboard_size_width-1, checkboard_size_height-1), corners, True)
-            name = out_basename.format(i)
+            name = out_basename.format(idx)
             cv2.imwrite(name,img)
 
         if save_corners:
-            name = corner_basename.format(i)
+            name = corner_basename.format(idx)
             with open(name, "wb") as fp:   
                 pickle.dump(image_points, fp)
 
         del img
 
-        # ============
-        # Compute the Intrinsics
-        if len(image_points_list) == 0: 
-            print "Error: No checkboard detected in all input images"
-            return
+    # ============
+    # Compute the Intrinsics
+    if len(image_points_list) == 0: 
+        print "Error: No checkboard detected in all input images"
+        return
 
-        print "Finish reading in all images!"
+    print "Finish reading in all images!"
 
 
-    intrinsics, distort_coef, error =  calculate_intrinsics_given_corners(image_corners_list,
+    intrinsics, distort_coef, error =  calculate_intrinsics_given_corners(image_points_list,
                 checkboard_size_width, checkboard_size_height,
                 image_size_width, image_size_height,
                 cell_width, cell_height)
@@ -238,8 +238,14 @@ def generate_intrinsics(image_base_name, start_idx, end_idx, step,
 
 
 def save_calibration_data_ini_file(file_name, intrinsics, distort_coef, img_width, img_height):
-    pass
+    f = open(file_name, "w+")
 
+    f.write('[Intrinsics]\n')
+    f.write('ImageSize= {} {}\n'.format(img_width, img_height))
+    f.write('Matrix= {}\n'.format(str(intrinsics.ravel().tolist())[1:-1]).replace(',', ''))
+    f.write('Distortion= {}\n'.format(str(distort_coef.ravel().tolist())[1:-1]).replace(',', ''))
+
+    f.close()
 
 
 
@@ -250,13 +256,14 @@ def check_and_create_dir(dir_name):
 
 
 
-rootDir = "xxxxxxxxxxxx"
+rootDir = "/data/j/zhen_egocentric_pose/capture/Capture_11-15-18_2"
 serial_str = ["Kinect01", "Kinect02", "Kinect03","Kinect04","Kinect05","Kinect09"]
 imgNamePre = ["img", "img", "img", "img", "img", "img", "img", "img", "img", "img"]
 
-start_idx = 1
-end_idx = 2
-step = 1
+num_cam = 1
+startFrame = 38
+endFrame = 1500
+step = 18
 
 
 checkboard_size_width = 7
@@ -264,15 +271,18 @@ checkboard_size_height = 6
 cell_width = 8.99286
 cell_height = 8.99286
 
-checkerboardImgDir = os.path.join(rootDir, "SyncImages")
+checkerboardImgDir = os.path.join(rootDir, "SyncData")
 
-detectedCornersDir = os.path.join(rootDir, "corners")
-outDir = os.path.join(rootDir, "output")
-intrinsicsDir = os.path.join(rootDir, "Intrinsics")
+detectedCornersDir = os.path.join(checkerboardImgDir, "corners")
+outDir = os.path.join(checkerboardImgDir, "output")
+intrinsicsDir = os.path.join(checkerboardImgDir, "Intrinsics")
 
 check_and_create_dir(detectedCornersDir)
 check_and_create_dir(outDir)
 check_and_create_dir(intrinsicsDir)
+
+error_file = os.path.join(intrinsicsDir, 'error.txt')
+f_error= open(error_file,"w+")
 
 
 for cam_idx in range(num_cam):
@@ -295,7 +305,7 @@ for cam_idx in range(num_cam):
         img_name = img_base_name.format(k)
         img = cv2.imread(img_name, cv2.IMREAD_UNCHANGED)
         if img is not None:
-            img_width, img_height = img.shape[:2]
+            img_height, img_width = img.shape[:2]
             del img
             break
 
@@ -309,13 +319,16 @@ for cam_idx in range(num_cam):
                             out_basename=detectedCheckerImgBaseName,
                             corner_basename=cornerDataBaseName,
                             )
-        
+    print intrinsics
+    print distort_coef
+    print error
     # TODO
-    # fprintf(file, "Intrinsics Error %02d: %f\n", i, error);
+    f_error.write("Intrinsics Error {}: {}".format(serial_str[cam_idx], error))
+   
     intrinsics_name = os.path.join(intrinsicsDir, 
                                    serial_str[cam_idx]+".ini")
-    # SaveCalibrationDataIniFile(intrinsics_name, intrinsics[i], distort_coefs[i], img_width, img_height);
-
+    save_calibration_data_ini_file(intrinsics_name, intrinsics, distort_coef, img_width, img_height);
+    f_error.close() 
 
 
 
