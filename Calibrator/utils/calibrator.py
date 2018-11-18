@@ -8,6 +8,49 @@ import pdb
 
 from visdom import Visdom
 
+class CameraParam():
+    def __init__(self, width=0, height=0, 
+        K=None, dist=None, R=None, t=None):
+
+        self.width  = width
+        self.height = height
+        self.K = K
+        self.dist = dist
+        self.R = R
+        self.t = t
+
+    def save_intrinsics_to_ini_file(self, file_name):
+        assert(self.w == 0 or self.h == 0)
+        assert(self.K is None or self.dist is None)
+        f = open(file_name, "w")
+        f.write('[Intrinsics]\n')
+        f.write('ImageSize= {} {}\n'.format(self.width, self.height))
+        f.write('Matrix= {}\n'.format(str(self.K.ravel().tolist())[1:-1]).replace(',', ''))
+        f.write('Distortion= {}\n'.format(str(self.dist.ravel().tolist())[1:-1]).replace(',', ''))
+        f.close()
+
+    def read_intrinsics_from_ini_file(self, file_name):
+        assert(self.R is not None and self.t is not None), \
+                'Read Intrinsics before Extrinsics'
+        with open(file_name) as f:
+            lines = f.readlines()
+
+        assert("Intrinsics" not in lines[0])
+        
+        line = lines[1].split()[1:]
+        self.width  = int(line[0])
+        self.height = int(line[1])
+
+        line = lines[2].split()[1:]
+        self.K = np.reshape(np.array([float(x) for x in line]), (3, 3))
+
+        line = lines[3].split()[1:]
+        self.dist = np.array([float(x) for x in line])
+
+
+
+
+
 def extract_and_refine_checkboard(img, isBGR, 
             checkboard_size_width, checkboard_size_height,
             border_width=5, bRefine=True, bFastCheck=False, 
@@ -127,7 +170,6 @@ def calculate_intrinsics_given_corners(image_corners_list,
 
 
 def generate_intrinsics(image_base_name, start_idx, end_idx, step,
-                    image_size_width, image_size_height,
                     checkboard_size_width, checkboard_size_height, 
                     cell_width, cell_height, 
                     show_checkboard=True, 
@@ -145,6 +187,17 @@ def generate_intrinsics(image_base_name, start_idx, end_idx, step,
         viz = Visdom(port=8095)
         checkboard_win = viz.image( np.random.rand(3, image_size_height, image_size_width),
             opts=dict(title='CheckerBoard', caption='Random'))
+
+
+    ################################################
+    ########### Get Size ##########################
+    for idx in range(start_idx, end_idx, step):
+        name = image_base_name.format(idx)
+        img = cv2.imread(name, cv2.IMREAD_UNCHANGED)
+        if img is not None:
+            image_size_height, image_size_width = img.shape[:2]
+            del img
+            break
 
     #################################################
     # Detect the checkboard from all the input images
@@ -214,8 +267,8 @@ def generate_intrinsics(image_base_name, start_idx, end_idx, step,
 
         del img
 
-    # ============
-    # Compute the Intrinsics
+    #############################################
+    ####### Compute the Intrinsics ##############
     if len(image_points_list) == 0: 
         print "Error: No checkboard detected in all input images"
         return
@@ -230,20 +283,8 @@ def generate_intrinsics(image_base_name, start_idx, end_idx, step,
 
     print "Finish Intrinsics Calibration!"
 
-    return intrinsics, distort_coef, error
-
-
-
-def save_calibration_data_ini_file(file_name, intrinsics, distort_coef, img_width, img_height):
-    f = open(file_name, "w+")
-
-    f.write('[Intrinsics]\n')
-    f.write('ImageSize= {} {}\n'.format(img_width, img_height))
-    f.write('Matrix= {}\n'.format(str(intrinsics.ravel().tolist())[1:-1]).replace(',', ''))
-    f.write('Distortion= {}\n'.format(str(distort_coef.ravel().tolist())[1:-1]).replace(',', ''))
-
-    f.close()
-
+    camera_param = CameraParam(width=width, height=height, K=intrinsics, dist=distort_coef)
+    return camera_param, error
 
 
 
