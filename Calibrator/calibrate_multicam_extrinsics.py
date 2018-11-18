@@ -1,6 +1,6 @@
 import os
 import cv2
-from utils.calibrator import generate_intrinsics
+from utils.calibrator import CameraParam, detect_checkboard_for_sequence
 
 def check_and_create_dir(dir_name):
     if not os.path.exists(dir_name):
@@ -14,9 +14,9 @@ imgNamePre = ["img", "img", "img", "img", "img", "img", "img", "img", "img", "im
 
 checkerboardImgDir = os.path.join(rootDir, "SyncData")
 intrinsicsDir = os.path.join(checkerboardImgDir, "Intrinsics")
-
 detectedCornersDir = os.path.join(checkerboardImgDir, "corners")
 outDir = os.path.join(checkerboardImgDir, "output")
+
 # externalTransDir  tmpdata
 # tmpDir tmpdata
 
@@ -43,13 +43,41 @@ check_and_create_dir(intrinsicsDir)
 # bool bLoadExternalTransforms = false;
 # bool bOnlyUseExternalTransforms = false;
 
-# bool save_tempory_data = true;	
+# bool save_tempory_data = true;    
 
 error_file = os.path.join(outDir, 'error.txt')
 f_error= open(error_file,"w+")
 
+#########################################
+############ Load Intrinsics ############
+cameras_param = [CameraParam() for cam_idx in range(num_cam)]
+for cam_idx in range(num_cam):
+    camDirName = serial_str[cam_idx]
+    intrinsics_file = os.path.join(intrinsicsDir, camDirName+".ini")
+    cameras_param[cam_idx].read_intrinsics_from_ini_file(intrinsics_file)
+    print "Succeed: load intrinsic file for {}".format(camDirName)
+
+for cam_idx in range(num_cam):
+    camDirName = serial_str[cam_idx]
+
+    detectedCornersSubFolder = os.path.join(detectedCornersDir, camDirName)
+    check_and_create_dir(detectedCornersSubFolder)
+
+    img_base_name = os.path.join(checkerboardImgDir, camDirName, 
+                            imgNamePre[cam_idx]+"_{0:05d}.jpg")
+    cornerDataBaseName = os.path.join(detectedCornersSubFolder,
+                            "corners_{0:05d}.pkl")
+    detectedCheckerImgBaseName = os.path.join(detectedCornersSubFolder, 
+                            "checkerBoard_{0:05d}.jpg")
 
 
-
-
-
+    # not bOnlyUseExternalTransforms
+    detected_frames_set, image_points_list = detect_checkboard_for_sequence(img_base_name, 
+                            startFrame, endFrame, step,
+                            checkboard_size_width, checkboard_size_height,
+                            cell_width, cell_height,
+                            show_checkboard=is_show_checkboard,
+                            wait_time=wait_time,
+                            out_basename=detectedCheckerImgBaseName,
+                            corner_basename=cornerDataBaseName,
+                            )

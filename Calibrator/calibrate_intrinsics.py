@@ -63,12 +63,13 @@ for cam_idx in range(num_cam):
                             )
 
 
+    print camera_param.width, camera_param.height
     print camera_param.K
     print camera_param.dist
     print error
 
-    intrinsics_name = os.path.join(intrinsicsDir, camDirName+".ini")
-    camera_param.save_intrinsics_to_ini_file(intrinsics_name)
+    intrinsics_file = os.path.join(intrinsicsDir, camDirName+".ini")
+    camera_param.save_intrinsics_to_ini_file(intrinsics_file)
 
     f_error.write("Intrinsics Error {}: {}\n".format(camDirName, error))
 

@@ -1,5 +1,6 @@
 import os
 import cv2
+from sets import Set
 import numpy as np
 import time
 import pickle
@@ -20,8 +21,8 @@ class CameraParam():
         self.t = t
 
     def save_intrinsics_to_ini_file(self, file_name):
-        assert(self.w == 0 or self.h == 0)
-        assert(self.K is None or self.dist is None)
+        assert(self.width != 0 or self.height != 0)
+        assert(self.K is not None or self.dist is not None)
         f = open(file_name, "w")
         f.write('[Intrinsics]\n')
         f.write('ImageSize= {} {}\n'.format(self.width, self.height))
@@ -169,7 +170,11 @@ def calculate_intrinsics_given_corners(image_corners_list,
     return mtx, dist, calib_error
 
 
-def generate_intrinsics(image_base_name, start_idx, end_idx, step,
+
+#################################################
+# Detect the checkboard from all the input images
+def detect_checkboard_for_sequence(image_base_name,
+                    start_idx, end_idx, step,
                     checkboard_size_width, checkboard_size_height, 
                     cell_width, cell_height, 
                     show_checkboard=True, 
@@ -178,31 +183,37 @@ def generate_intrinsics(image_base_name, start_idx, end_idx, step,
                     save_corners=True, corner_basename=None, 
                     isBGR=True, bSaveNullImageCorners=True,
                     bFlipHorizontal=False, bFastCheck=False):
-    
-    if save_corners: 
-        assert corner_basename is not None, \
-                "corner_basename need to be set"
 
     if show_checkboard and not wait_for_key:
         viz = Visdom(port=8095)
         checkboard_win = viz.image( np.random.rand(3, image_size_height, image_size_width),
             opts=dict(title='CheckerBoard', caption='Random'))
 
-
-    ################################################
-    ########### Get Size ##########################
-    for idx in range(start_idx, end_idx, step):
-        name = image_base_name.format(idx)
-        img = cv2.imread(name, cv2.IMREAD_UNCHANGED)
-        if img is not None:
-            image_size_height, image_size_width = img.shape[:2]
-            del img
-            break
-
-    #################################################
-    # Detect the checkboard from all the input images
+    detected_frames_set = Set()
     image_points_list = []
+    
     for idx in range(start_idx, end_idx, step):
+
+        is_load_from_file = False
+
+        ####### Load Corners if the image has been processed
+        name = corner_basename.format(idx)
+        if os.path.exists(name):
+            image_points = pickle.load(open( name, "rb"))
+
+            print "Load processed corners for {0:05d}-th image".format(idx)
+            
+            if image_points is None:
+                print "Warning: No checkboard is detected in the {}-th image!".format(idx)
+                continue
+
+            ######### Record the Checkboard Points
+            detected_frames_set.add(idx)
+            image_points_list.append(image_points)
+            continue
+
+    
+        ######## Read Image
         print "Reading Image: {0:05d}".format(idx)
         name = image_base_name.format(idx)
         img = cv2.imread(name, cv2.IMREAD_UNCHANGED)
@@ -220,6 +231,7 @@ def generate_intrinsics(image_base_name, start_idx, end_idx, step,
         if bFlipHorizontal:
             img = cv2.flip(img, 1)
 
+        ####### Extract Checkboard
         image_points = extract_and_refine_checkboard(img, isBGR, 
                 checkboard_size_width, checkboard_size_height,
                 bFastCheck=bFastCheck)
@@ -228,7 +240,7 @@ def generate_intrinsics(image_base_name, start_idx, end_idx, step,
             print "Warning: No checkboard is detected in the {}-th image!".format(idx)
 
             # save corners even when image_points is None
-            if save_corners and bSaveNullImageCorners:            
+            if  save_corners and bSaveNullImageCorners:          
                 name = corner_basename.format(idx)
                 with open(name, "wb") as fp:   
                     pickle.dump(image_points, fp)
@@ -240,7 +252,9 @@ def generate_intrinsics(image_base_name, start_idx, end_idx, step,
 
             del img; continue
 
-        image_points_list.append(image_points);
+        ######### Record the Checkboard Points
+        detected_frames_set.add(idx)
+        image_points_list.append(image_points)
 
         if show_checkboard:
             
@@ -260,7 +274,7 @@ def generate_intrinsics(image_base_name, start_idx, end_idx, step,
             name = out_basename.format(idx)
             cv2.imwrite(name,img)
 
-        if save_corners:
+        if  save_corners:
             name = corner_basename.format(idx)
             with open(name, "wb") as fp:   
                 pickle.dump(image_points, fp)
@@ -274,8 +288,49 @@ def generate_intrinsics(image_base_name, start_idx, end_idx, step,
         return
 
     print "Finish reading in all images!"
+    return detected_frames_set, image_points_list
 
 
+def generate_intrinsics(image_base_name, start_idx, end_idx, step,
+                    checkboard_size_width, checkboard_size_height, 
+                    cell_width, cell_height, 
+                    show_checkboard=True, 
+                    wait_for_key=False, wait_time=0.01,
+                    save_checkerboardImg=True, out_basename=None,
+                    save_corners=True, corner_basename=None, 
+                    isBGR=True, bSaveNullImageCorners=True,
+                    bFlipHorizontal=False, bFastCheck=False):
+    
+    if save_corners: 
+        assert corner_basename is not None, \
+                "corner_basename need to be set"
+
+    #####################################################
+    ################ Get Size ###########################
+    for idx in range(start_idx, end_idx, step):
+        name = image_base_name.format(idx)
+        img = cv2.imread(name, cv2.IMREAD_UNCHANGED)
+        if img is not None:
+            image_size_height, image_size_width = img.shape[:2]
+            del img
+            break
+
+
+    #####################################################
+    ########### Detect Checkboard #######################
+    _, image_points_list = detect_checkboard_for_sequence(image_base_name,
+                    start_idx, end_idx, step,
+                    checkboard_size_width, checkboard_size_height, 
+                    cell_width, cell_height, 
+                    show_checkboard=show_checkboard, 
+                    wait_for_key=wait_for_key, wait_time=wait_time,
+                    save_checkerboardImg=save_checkerboardImg, out_basename=out_basename,
+                    save_corners=save_corners, corner_basename=corner_basename, 
+                    isBGR=isBGR, bSaveNullImageCorners=bSaveNullImageCorners,
+                    bFlipHorizontal=bFlipHorizontal, bFastCheck=bFastCheck)
+
+    ######################################################
+    ########### Calculate the Intrinsics #################
     intrinsics, distort_coef, error =  calculate_intrinsics_given_corners(image_points_list,
                 checkboard_size_width, checkboard_size_height,
                 image_size_width, image_size_height,
@@ -283,7 +338,8 @@ def generate_intrinsics(image_base_name, start_idx, end_idx, step,
 
     print "Finish Intrinsics Calibration!"
 
-    camera_param = CameraParam(width=width, height=height, K=intrinsics, dist=distort_coef)
+    camera_param = CameraParam(width=image_size_width, height=image_size_height,
+                               K=intrinsics, dist=distort_coef)
     return camera_param, error
 
 
