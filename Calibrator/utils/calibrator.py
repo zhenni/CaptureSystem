@@ -1,6 +1,5 @@
 import os
 import cv2
-from sets import Set
 import numpy as np
 import time
 import pickle
@@ -31,12 +30,18 @@ class CameraParam():
         f.close()
 
     def read_intrinsics_from_ini_file(self, file_name):
-        assert(self.R is not None and self.t is not None), \
+        assert(self.R is None and self.t is None), \
                 'Read Intrinsics before Extrinsics'
+
+        if not os.path.exists(file_name):
+            print "Cannot load ini file, {} does not exists".format(file_name)
+            return False
+
         with open(file_name) as f:
             lines = f.readlines()
 
-        assert("Intrinsics" not in lines[0])
+        assert("Intrinsics" in lines[0]), \
+            "File {} is not a valid Intrinsics File".format(file_name)
         
         line = lines[1].split()[1:]
         self.width  = int(line[0])
@@ -47,9 +52,7 @@ class CameraParam():
 
         line = lines[3].split()[1:]
         self.dist = np.array([float(x) for x in line])
-
-
-
+        return True
 
 
 def extract_and_refine_checkboard(img, isBGR, 
@@ -126,6 +129,17 @@ def extract_and_refine_checkboard(img, isBGR,
     return corners
 
 
+def generate_object_points(image_count,
+                                checkboard_size_width, checkboard_size_height,
+                                cell_width, cell_height):
+    point_num_per_image = (checkboard_size_height-1)*(checkboard_size_width-1) 
+    object_points_one_image = np.zeros((point_num_per_image, 3), np.float32)
+    object_points_one_image[:,:2] = np.mgrid[0:(checkboard_size_width-1), 0:(checkboard_size_height-1)].T.reshape(-1,2)
+    object_points_one_image[:, 0] *= cell_width
+    object_points_one_image[:, 1] *= cell_height
+    objpoints = [object_points_one_image]*image_count
+    return objpoints
+
 def calculate_intrinsics_given_corners(image_corners_list, 
             checkboard_size_width, checkboard_size_height,
             image_size_width, image_size_height,
@@ -134,7 +148,6 @@ def calculate_intrinsics_given_corners(image_corners_list,
     '''
     return intrinsics, distort_coef, error
     '''
-    point_num_per_image = (checkboard_size_height-1)*(checkboard_size_width-1) 
 
     image_count = len(image_corners_list)
     if (image_count > MAX_VIEW_NUMBER_USED):
@@ -150,13 +163,12 @@ def calculate_intrinsics_given_corners(image_corners_list,
         print "Warning: only {} views are used (total:{})!".format(MAX_VIEW_NUMBER_USED, image_count) 
         image_count = MAX_VIEW_NUMBER_USED
 
-    object_points_one_image = np.zeros((point_num_per_image, 3), np.float32)
-    object_points_one_image[:,:2] = np.mgrid[0:(checkboard_size_width-1), 0:(checkboard_size_height-1)].T.reshape(-1,2)
-    object_points_one_image[:, 0] *= cell_width
-    object_points_one_image[:, 1] *= cell_height
 
+    objpoints = generate_object_points(image_count,
+                                checkboard_size_width, checkboard_size_height,
+                                cell_width, cell_height)
 
-    objpoints = [object_points_one_image]*image_count
+    
 
     print "Begin Compute Intrinsics ({} views are used)...".format(image_count)
 
@@ -175,6 +187,7 @@ def calculate_intrinsics_given_corners(image_corners_list,
 # Detect the checkboard from all the input images
 def detect_checkboard_for_sequence(image_base_name,
                     start_idx, end_idx, step,
+                    image_size_width, image_size_height,
                     checkboard_size_width, checkboard_size_height, 
                     cell_width, cell_height, 
                     show_checkboard=True, 
@@ -189,9 +202,9 @@ def detect_checkboard_for_sequence(image_base_name,
         checkboard_win = viz.image( np.random.rand(3, image_size_height, image_size_width),
             opts=dict(title='CheckerBoard', caption='Random'))
 
-    detected_frames_set = Set()
-    image_points_list = []
+    image_points_dict = dict() # (key, value): (frame_idx, image_points)
     
+    # TODO: parallel
     for idx in range(start_idx, end_idx, step):
 
         is_load_from_file = False
@@ -208,8 +221,7 @@ def detect_checkboard_for_sequence(image_base_name,
                 continue
 
             ######### Record the Checkboard Points
-            detected_frames_set.add(idx)
-            image_points_list.append(image_points)
+            image_points_dict[idx] = image_points
             continue
 
     
@@ -253,8 +265,7 @@ def detect_checkboard_for_sequence(image_base_name,
             del img; continue
 
         ######### Record the Checkboard Points
-        detected_frames_set.add(idx)
-        image_points_list.append(image_points)
+        image_points_dict[idx] = image_points
 
         if show_checkboard:
             
@@ -283,12 +294,12 @@ def detect_checkboard_for_sequence(image_base_name,
 
     #############################################
     ####### Compute the Intrinsics ##############
-    if len(image_points_list) == 0: 
+    if len(image_points_dict) == 0: 
         print "Error: No checkboard detected in all input images"
         return
 
     print "Finish reading in all images!"
-    return detected_frames_set, image_points_list
+    return image_points_dict
 
 
 def generate_intrinsics(image_base_name, start_idx, end_idx, step,
@@ -318,8 +329,9 @@ def generate_intrinsics(image_base_name, start_idx, end_idx, step,
 
     #####################################################
     ########### Detect Checkboard #######################
-    _, image_points_list = detect_checkboard_for_sequence(image_base_name,
+    image_points_dict = detect_checkboard_for_sequence(image_base_name,
                     start_idx, end_idx, step,
+                    image_size_width, image_size_height,
                     checkboard_size_width, checkboard_size_height, 
                     cell_width, cell_height, 
                     show_checkboard=show_checkboard, 
@@ -331,7 +343,8 @@ def generate_intrinsics(image_base_name, start_idx, end_idx, step,
 
     ######################################################
     ########### Calculate the Intrinsics #################
-    intrinsics, distort_coef, error =  calculate_intrinsics_given_corners(image_points_list,
+    intrinsics, distort_coef, error =  calculate_intrinsics_given_corners(
+                image_points_dict.values(),
                 checkboard_size_width, checkboard_size_height,
                 image_size_width, image_size_height,
                 cell_width, cell_height)
