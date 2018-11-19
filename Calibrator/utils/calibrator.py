@@ -29,6 +29,29 @@ class CameraParam():
         f.write('Distortion= {}\n'.format(str(self.dist.ravel().tolist())[1:-1]).replace(',', ''))
         f.close()
 
+    def save_calibration(self, file_name):
+        assert(self.width != 0 or self.height != 0)
+        assert(self.K is not None or self.dist is not None)
+        assert(self.R is not None or self.t is not None)
+        f = open(file_name, "w")
+        f.write('{} {}\n'.format(self.width, self.height))
+
+        for i in range(3):
+            f.write('{}\n'.format(str(self.K[i].tolist())[1:-1]).replace(',', ''))
+        
+        for i in range(3):
+            f.write('{}\n'.format(str(self.R[i].tolist())[1:-1]).replace(',', ''))
+
+        for i in range(3):
+            f.write('{}\n'.format(str(self.t[i].tolist())[1:-1]).replace(',', ''))
+            # f.write('{}\n'.format(self.t[0]))        
+
+        for i in range(5):
+            f.write('{}\n'.format(self.dist[i]))
+        f.close()
+
+
+
     def read_intrinsics_from_ini_file(self, file_name):
         assert(self.R is None and self.t is None), \
                 'Read Intrinsics before Extrinsics'
@@ -55,6 +78,15 @@ class CameraParam():
         return True
 
 
+def compliment_rodrigues(rod_src):
+
+    theta = cv2.norm(rod_src);
+    rod_dst = cv2.normalize(rod_src)
+    rod_dst = rod_dst * (-(2*np.pi-theta))
+
+    return rod_dst
+
+
 def extract_and_refine_checkboard(img, isBGR, 
             checkboard_size_width, checkboard_size_height,
             border_width=5, bRefine=True, bFastCheck=False, 
@@ -65,7 +97,7 @@ def extract_and_refine_checkboard(img, isBGR,
     '''
 
     if img is None:
-        print "Warning: input image is NULL!"
+        print "\t Warning: input image is NULL!"
         return None
 
     flag = 0
@@ -160,7 +192,7 @@ def calculate_intrinsics_given_corners(image_corners_list,
         accept_indices[discard_indices]=False
         image_points_list = [image_points_list[idx] for idx in accept_indices]
 
-        print "Warning: only {} views are used (total:{})!".format(MAX_VIEW_NUMBER_USED, image_count) 
+        print "\t Warning: only {} views are used (total:{})!".format(MAX_VIEW_NUMBER_USED, image_count) 
         image_count = MAX_VIEW_NUMBER_USED
 
 
@@ -182,6 +214,93 @@ def calculate_intrinsics_given_corners(image_corners_list,
     return mtx, dist, calib_error
 
 
+def detect_checkboard(image_file_name, 
+                    image_size_width, image_size_height,
+                    checkboard_size_width, checkboard_size_height, 
+                    cell_width, cell_height, 
+                    checkboard_win=None, 
+                    wait_for_key=False, wait_time=0.01,
+                    out_image_file_name=None,
+                    corner_saved_file_name=None, 
+                    isBGR=True, bSaveNullImageCorners=True,
+                    bFlipHorizontal=False, bFastCheck=False):
+
+    ####### Load Corners if the image has been processed
+    if corner_saved_file_name is not None:
+        if os.path.exists(corner_saved_file_name):
+
+            image_points = pickle.load(open(corner_saved_file_name, "rb"))
+            print "Load processed corners for {}".format(image_file_name)
+            
+            if image_points is None:
+                print "\t Warning: No checkboard is detected in the {}!".format(image_file_name)
+                
+            ######### Record the Checkboard Points
+            return image_points
+
+    ######## Read Image
+    print "Reading Image: {}".format(image_file_name)
+    img = cv2.imread(image_file_name, cv2.IMREAD_UNCHANGED)
+
+    if img is None:
+        print "\t Warning: Cannot Read {}!".format(image_file_name)
+        return None
+
+    img_height, img_width = img.shape[:2]
+    if not img_width == image_size_width or not img_height == image_size_height:
+        print "\t Warning: Not an qualified image due to its size! {}".format(image_file_name)
+        return None
+
+    # Flip if needed
+    if bFlipHorizontal:
+        img = cv2.flip(img, 1)
+
+    ####### Extract Checkboard
+    image_points = extract_and_refine_checkboard(img, isBGR, 
+            checkboard_size_width, checkboard_size_height,
+            bFastCheck=bFastCheck)
+
+    if image_points is None:
+        print "\t Warning: No checkboard is detected! {}".format(image_file_name)
+
+        # save corners even when image_points is None
+        if corner_saved_file_name is not None and bSaveNullImageCorners:          
+            with open(corner_saved_file_name, "wb") as fp:   
+                pickle.dump(image_points, fp)
+
+        if checkboard_win is not None:
+            checkboard_win = viz.image( img.transpose(2, 0, 1)[::-1], win=checkboard_win,
+            opts=dict(title='CheckerBoard', caption='{}-th image. No checkboard is detected.'.format(idx)))
+    
+            if wait_for_key:
+                raw_input("Enter any thing to Continue...")
+            else:
+                time.sleep(wait_time)
+    else:
+        # checkboard detected
+        if corner_saved_file_name is not None:
+            with open(corner_saved_file_name, "wb") as fp:   
+                pickle.dump(image_points, fp)
+
+        if checkboard_win is not None:
+            cv2.drawChessboardCorners(img, (checkboard_size_width-1, checkboard_size_height-1), image_points, True)
+
+            checkboard_win = viz.image( img.transpose(2, 0, 1)[::-1] , win=checkboard_win,
+                opts=dict(title='CheckerBoard', caption='{}-th image'.format(idx)))
+
+            if wait_for_key:
+                raw_input("Enter any thing to Continue...")
+            else:
+                time.sleep(wait_time)
+
+        if out_image_file_name is not None:
+            if checkboard_win is None: 
+                cv2.drawChessboardCorners(img, (checkboard_size_width-1, checkboard_size_height-1), image_points, True)
+            cv2.imwrite(out_image_file_name, img)
+
+    return image_points
+
+
 
 #################################################
 # Detect the checkboard from all the input images
@@ -197,7 +316,17 @@ def detect_checkboard_for_sequence(image_base_name,
                     isBGR=True, bSaveNullImageCorners=True,
                     bFlipHorizontal=False, bFastCheck=False):
 
-    if show_checkboard and not wait_for_key:
+    if save_corners: 
+        assert(corner_basename is not None), \
+                "corner_basename need to be set"
+
+    if save_checkerboardImg:
+        assert(out_basename is not None), \
+                "out_basename need to be set"
+
+
+    checkboard_win = None
+    if show_checkboard:
         viz = Visdom(port=8095)
         checkboard_win = viz.image( np.random.rand(3, image_size_height, image_size_width),
             opts=dict(title='CheckerBoard', caption='Random'))
@@ -207,90 +336,32 @@ def detect_checkboard_for_sequence(image_base_name,
     # TODO: parallel
     for idx in range(start_idx, end_idx, step):
 
-        is_load_from_file = False
+        image_file_name = image_base_name.format(idx)
+        corner_saved_file_name = None
+        out_image_file_name = None
 
-        ####### Load Corners if the image has been processed
-        name = corner_basename.format(idx)
-        if os.path.exists(name):
-            image_points = pickle.load(open( name, "rb"))
-
-            print "Load processed corners for {0:05d}-th image".format(idx)
-            
-            if image_points is None:
-                print "Warning: No checkboard is detected in the {}-th image!".format(idx)
-                continue
-
-            ######### Record the Checkboard Points
-            image_points_dict[idx] = image_points
-            continue
-
+        if save_corners:
+            corner_saved_file_name = corner_basename.format(idx)
+        if save_checkerboardImg:
+            out_image_file_name =out_basename.format(idx)
     
-        ######## Read Image
-        print "Reading Image: {0:05d}".format(idx)
-        name = image_base_name.format(idx)
-        img = cv2.imread(name, cv2.IMREAD_UNCHANGED)
-
-        if img is None:
-            print "Warning: {0:05d}-th image is NULL!".format(idx)
-            del img; continue
-
-        img_height, img_width = img.shape[:2]
-        if not img_width == image_size_width or not img_height == image_size_height:
-            print "Warning: {0:05d}-th image is not an qualified image due to its size!".format(idx)
-            del img; continue
+        image_points = detect_checkboard(image_file_name, 
+                    image_size_width, image_size_height,
+                    checkboard_size_width, checkboard_size_height, 
+                    cell_width, cell_height, 
+                    checkboard_win=checkboard_win, 
+                    wait_for_key=wait_for_key, wait_time=wait_time,
+                    out_image_file_name=out_image_file_name,
+                    corner_saved_file_name=corner_saved_file_name, 
+                    isBGR=isBGR, bSaveNullImageCorners=bSaveNullImageCorners,
+                    bFlipHorizontal=bFlipHorizontal, bFastCheck=bFastCheck)
 
 
-        if bFlipHorizontal:
-            img = cv2.flip(img, 1)
+        if image_points is not None:
+            image_points_dict[idx] = image_points
 
-        ####### Extract Checkboard
-        image_points = extract_and_refine_checkboard(img, isBGR, 
-                checkboard_size_width, checkboard_size_height,
-                bFastCheck=bFastCheck)
 
-        if image_points is None:
-            print "Warning: No checkboard is detected in the {}-th image!".format(idx)
 
-            # save corners even when image_points is None
-            if  save_corners and bSaveNullImageCorners:          
-                name = corner_basename.format(idx)
-                with open(name, "wb") as fp:   
-                    pickle.dump(image_points, fp)
-
-            if show_checkboard:
-                checkboard_win = viz.image( img.transpose(2, 0, 1)[::-1], win=checkboard_win,
-                opts=dict(title='CheckerBoard', caption='{}-th image. No checkboard is detected.'.format(idx)))
-                time.sleep(wait_time)
-
-            del img; continue
-
-        ######### Record the Checkboard Points
-        image_points_dict[idx] = image_points
-
-        if show_checkboard:
-            
-            cv2.drawChessboardCorners(img, (checkboard_size_width-1, checkboard_size_height-1), image_points, True)
-
-            checkboard_win = viz.image( img.transpose(2, 0, 1)[::-1] , win=checkboard_win,
-                opts=dict(title='CheckerBoard', caption='{}-th image'.format(idx)))
-
-            if wait_for_key:
-                raw_input("")
-            else:
-                time.sleep(wait_time)
-
-        if save_checkerboardImg and out_basename is not None:
-            if not show_checkboard: 
-                cv2.drawChessboardCorners(img, (checkboard_size_width-1, checkboard_size_height-1), image_points, True)
-            name = out_basename.format(idx)
-            cv2.imwrite(name,img)
-
-        if  save_corners:
-            name = corner_basename.format(idx)
-            with open(name, "wb") as fp:   
-                pickle.dump(image_points, fp)
-
-        del img
 
     #############################################
     ####### Compute the Intrinsics ##############
@@ -312,10 +383,6 @@ def generate_intrinsics(image_base_name, start_idx, end_idx, step,
                     isBGR=True, bSaveNullImageCorners=True,
                     bFlipHorizontal=False, bFastCheck=False):
     
-    if save_corners: 
-        assert corner_basename is not None, \
-                "corner_basename need to be set"
-
     #####################################################
     ################ Get Size ###########################
     for idx in range(start_idx, end_idx, step):
@@ -323,7 +390,6 @@ def generate_intrinsics(image_base_name, start_idx, end_idx, step,
         img = cv2.imread(name, cv2.IMREAD_UNCHANGED)
         if img is not None:
             image_size_height, image_size_width = img.shape[:2]
-            del img
             break
 
 
