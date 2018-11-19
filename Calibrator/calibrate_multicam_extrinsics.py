@@ -167,7 +167,7 @@ for cam_idx1 in range(num_cam):
         # Print Log
         log_msg = "Reprojection Error between Cam {} and Cam {}: {} , pairs<{} / {}>".format(camDirName1, camDirName2, error, image_used_count, image_count)
         print log_msg
-        f_error.write(log_msg)
+        f_error.write(log_msg+"\n")
 
         if is_save_tempory_data:
             # Save Essential Matrix

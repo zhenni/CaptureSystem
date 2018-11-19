@@ -29,29 +29,6 @@ class CameraParam():
         f.write('Distortion= {}\n'.format(str(self.dist.ravel().tolist())[1:-1]).replace(',', ''))
         f.close()
 
-    def save_calibration(self, file_name):
-        assert(self.width != 0 or self.height != 0)
-        assert(self.K is not None or self.dist is not None)
-        assert(self.R is not None or self.t is not None)
-        f = open(file_name, "w")
-        f.write('{} {}\n'.format(self.width, self.height))
-
-        for i in range(3):
-            f.write('{}\n'.format(str(self.K[i].tolist())[1:-1]).replace(',', ''))
-        
-        for i in range(3):
-            f.write('{}\n'.format(str(self.R[i].tolist())[1:-1]).replace(',', ''))
-
-        for i in range(3):
-            f.write('{}\n'.format(str(self.t[i].tolist())[1:-1]).replace(',', ''))
-            # f.write('{}\n'.format(self.t[0]))        
-
-        for i in range(5):
-            f.write('{}\n'.format(self.dist[i]))
-        f.close()
-
-
-
     def read_intrinsics_from_ini_file(self, file_name):
         assert(self.R is None and self.t is None), \
                 'Read Intrinsics before Extrinsics'
@@ -77,6 +54,54 @@ class CameraParam():
         self.dist = np.array([float(x) for x in line])
         return True
 
+    def save_calibration(self, file_name):
+        assert(self.width != 0 or self.height != 0)
+        assert(self.K is not None or self.dist is not None)
+        assert(self.R is not None or self.t is not None)
+        f = open(file_name, "w")
+        f.write('{} {}\n'.format(self.width, self.height))
+
+        for i in range(3):
+            f.write('{}\n'.format(str(self.K[i].tolist())[1:-1]).replace(',', ''))
+        
+        for i in range(3):
+            f.write('{}\n'.format(str(self.R[i].tolist())[1:-1]).replace(',', ''))
+
+        for i in range(3):
+            f.write('{}\n'.format(str(self.t[i].tolist())[1:-1]).replace(',', ''))
+            # f.write('{}\n'.format(self.t[0]))        
+
+        for i in range(5):
+            f.write('{}\n'.format(self.dist[i]))
+        f.close()
+
+    def read_calibration(self, file_name):
+        with open(file_name) as f:
+            lines = f.readlines()  
+
+        line = lines[0].split()
+        self.width = int(line[0])
+        self.height = int(line[1])
+        
+        line = " ".join(lines[1:4]).split()
+        self.K = np.reshape(np.array([float(x) for x in line]), (3, 3))
+
+        line = " ".join(lines[4:7]).split()
+        self.R = np.reshape(np.array([float(x) for x in line]), (3, 3))
+
+        line = " ".join(lines[7:10]).split()
+        self.t = np.reshape(np.array([float(x) for x in line]), (3, 1))
+
+        line = " ".join(lines[10:]).split()
+        self.dist = np.array([float(x) for x in line])
+
+    def __str__(self):
+        ret_str  = "Image Size: {} x {}\n".format(self.width, self.height)
+        ret_str += "Intrinsics Matrix: {}\n".format(self.K)
+        ret_str += "Distortion: {}\n".format(self.dist)
+        ret_str += "Extrinsics Rotation : {}\n".format(self.R)
+        ret_str += "Extrinsics Translation : {}\n".format(self.t)
+        return ret_str
 
 def compliment_rodrigues(rod_src):
 
@@ -153,9 +178,10 @@ def extract_and_refine_checkboard(img, isBGR,
 
     #  check corners
     point_num_per_image = (checkboard_size_height-1)*(checkboard_size_width-1)
-    assert (corners.shape[0]==point_num_per_image,
-            corners.shape[1]==1 and corners.shape[2]==2), \
-        "Corners is not a qualified corner matrix"
+    # Assertion always True
+    # assert (corners.shape[0]==point_num_per_image,
+    #        corners.shape[1]==1 and corners.shape[2]==2), \
+    #    "Corners is not a qualified corner matrix"
 
 
     return corners
