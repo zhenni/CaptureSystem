@@ -3,7 +3,8 @@ import cv2
 import numpy as np
 import time
 import pickle
-
+# import multiprocessing
+from  pathos.multiprocessing import ProcessingPool as Pool
 import pdb
 
 from visdom import Visdom
@@ -129,8 +130,7 @@ def extract_and_refine_checkboard(img, isBGR,
     if bFastCheck:
         flag = cv2.CALIB_CB_ADAPTIVE_THRESH + cv2.CALIB_CB_NORMALIZE_IMAGE + cv2.CV_CALIB_CB_FAST_CHECK
     else:
-        flag = cv2.CALIB_CB_ADAPTIVE_THRESH + cv2.CALIB_CB_NORMALIZE_IMAGE + cv2.CALIB_CB_FILTER_QUADS#  + cv2.CALIB_CB_NORMALIZE_IMAGE;
-
+        flag = cv2.CALIB_CB_ADAPTIVE_THRESH + cv2.CALIB_CB_NORMALIZE_IMAGE + cv2.CALIB_CB_FILTER_QUADS
     h, w = img.shape[:2]
 
     if w > SMALL_WIDTH:
@@ -214,9 +214,9 @@ def calculate_intrinsics_given_corners(image_corners_list,
         ratio = image_count // discard_num
 
         discard_indices = np.arange(discard_num) * ratio
-        accept_indices = np.ones((image_count), type=np.bool)
+        accept_indices = np.ones((image_count), dtype=np.bool)
         accept_indices[discard_indices]=False
-        image_points_list = [image_points_list[idx] for idx in accept_indices]
+        image_corners_list = [image_corners_list[idx] for idx, v in enumerate(accept_indices) if v == True]
 
         print "\t Warning: only {} views are used (total:{})!".format(MAX_VIEW_NUMBER_USED, image_count) 
         image_count = MAX_VIEW_NUMBER_USED
@@ -324,7 +324,7 @@ def detect_checkboard(image_file_name,
                 cv2.drawChessboardCorners(img, (checkboard_size_width-1, checkboard_size_height-1), image_points, True)
             cv2.imwrite(out_image_file_name, img)
 
-    return image_points
+    return image_points    
 
 
 
@@ -360,8 +360,7 @@ def detect_checkboard_for_sequence(image_base_name,
     image_points_dict = dict() # (key, value): (frame_idx, image_points)
     
     # TODO: parallel
-    for idx in range(start_idx, end_idx, step):
-
+    def detect_checkboard_parallel_func(idx):
         image_file_name = image_base_name.format(idx)
         corner_saved_file_name = None
         out_image_file_name = None
@@ -370,8 +369,8 @@ def detect_checkboard_for_sequence(image_base_name,
             corner_saved_file_name = corner_basename.format(idx)
         if save_checkerboardImg:
             out_image_file_name =out_basename.format(idx)
-    
-        image_points = detect_checkboard(image_file_name, 
+
+        return detect_checkboard(image_file_name, 
                     image_size_width, image_size_height,
                     checkboard_size_width, checkboard_size_height, 
                     cell_width, cell_height, 
@@ -382,9 +381,38 @@ def detect_checkboard_for_sequence(image_base_name,
                     isBGR=isBGR, bSaveNullImageCorners=bSaveNullImageCorners,
                     bFlipHorizontal=bFlipHorizontal, bFastCheck=bFastCheck)
 
-
+    # p = multiprocessing.Pool(1)
+    p = Pool(8)
+    image_points_list = p.map(detect_checkboard_parallel_func, range(start_idx, end_idx, step))
+    for list_idx, image_points in enumerate(image_points_list):
+        idx = start_idx + step * list_idx
         if image_points is not None:
             image_points_dict[idx] = image_points
+
+    # for idx in range(start_idx, end_idx, step):
+
+    #     image_file_name = image_base_name.format(idx)
+    #     corner_saved_file_name = None
+    #     out_image_file_name = None
+
+    #     if save_corners:
+    #         corner_saved_file_name = corner_basename.format(idx)
+    #     if save_checkerboardImg:
+    #         out_image_file_name =out_basename.format(idx)
+    
+    #     image_points = detect_checkboard(image_file_name, 
+    #                 image_size_width, image_size_height,
+    #                 checkboard_size_width, checkboard_size_height, 
+    #                 cell_width, cell_height, 
+    #                 checkboard_win=checkboard_win, 
+    #                 wait_for_key=wait_for_key, wait_time=wait_time,
+    #                 out_image_file_name=out_image_file_name,
+    #                 corner_saved_file_name=corner_saved_file_name, 
+    #                 isBGR=isBGR, bSaveNullImageCorners=bSaveNullImageCorners,
+    #                 bFlipHorizontal=bFlipHorizontal, bFastCheck=bFastCheck)
+
+    #     if image_points is not None:
+    #         image_points_dict[idx] = image_points
 
 
 

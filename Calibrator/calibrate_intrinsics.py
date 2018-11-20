@@ -8,13 +8,13 @@ def check_and_create_dir(dir_name):
 
 
 rootDir = "/data/j/zhen_egocentric_pose/capture/Capture_11-15-18_2"
-serial_str = ["Kinect01", "Kinect02", "Kinect03","Kinect04","Kinect05","Kinect09"]
+serial_str = ["Kinect03", "Kinect02", "Kinect01","Kinect04","Kinect05","Kinect09"]
 imgNamePre = ["img", "img", "img", "img", "img", "img", "img", "img", "img", "img"]
 
 num_cam = 6
 startFrame = 38
 endFrame = 1500
-step = 18
+step = 5
 
 is_show_checkboard = False
 wait_time = 0.0
