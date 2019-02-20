@@ -58,7 +58,8 @@ const PixelFormatEnums selectPixelFormat = PixelFormat_BGR8; // PixelFormat_Mono
 const gcstring selectPixelFormatName = "BGR8";
 const int selectFrameRate = 30;
 const videoType chosenVideoType = UNCOMPRESSED;
-const unsigned int k_numImages = 1000;
+const unsigned int k_numImages = 10000;
+const unsigned int k_savePerNumImages = 500;
 // ===================================================================================
 
 
@@ -161,7 +162,6 @@ int DisableHeartbeat(CameraPtr pCam, INodeMap & nodeMap, INodeMap & nodeMapTLDev
     return 0;
 }
 #endif
-
 
 
 // This function configures the camera to use a trigger. First, trigger mode is 
@@ -307,13 +307,13 @@ int ConfigureTrigger(INodeMap & nodeMap, bool is_primary)
     return result;
 }
 
-
 // This function retrieves a single image using the trigger. In this example, 
 // only a single image is captured and made available for acquisition - as such,
 // attempting to acquire two images for a single trigger execution would cause 
 // the example to hang. This is different from other examples, whereby a 
 // constant stream of images are being captured and made available for image
 // acquisition.
+/*
 int GrabNextImageByTrigger(INodeMap & nodeMap, CameraPtr pCam, bool is_primary)
 {
 	int result = 0;
@@ -362,7 +362,7 @@ int GrabNextImageByTrigger(INodeMap & nodeMap, CameraPtr pCam, bool is_primary)
 
 	return result;
 }
-
+*/
 
 
 // This function configures a number of settings on the camera including offsets 
@@ -524,8 +524,9 @@ int ConfigureCustomImageSettings(INodeMap & nodeMap)
 	return result;
 }
 
+
 // This function prepares, saves, and cleans up an video from a vector of images.
-int SaveVectorToVideo(INodeMap & nodeMap, INodeMap & nodeMapTLDevice, vector<ImagePtr> & images)
+int SaveVectorToVideo(INodeMap & nodeMap, INodeMap & nodeMapTLDevice, vector<ImagePtr> & images, unsigned int id)
 {
 	int result = 0;
 
@@ -563,7 +564,7 @@ int SaveVectorToVideo(INodeMap & nodeMap, INodeMap & nodeMapTLDevice, vector<Ima
 
 		cout << "Frame rate to be set to " << frameRateToSet << "..." << endl;
 
-		//
+		//==========================================================================
 		// Create a unique filename
 		//
 		// *** NOTES ***
@@ -574,13 +575,16 @@ int SaveVectorToVideo(INodeMap & nodeMap, INodeMap & nodeMapTLDevice, vector<Ima
 		//
 		string videoFilename;
 
+		char buffer[256]; sprintf(buffer, "%03d", id);
+		string video_id(buffer);
+
 		switch (chosenVideoType)
 		{
 		case UNCOMPRESSED:
 			videoFilename = "SaveToAvi-Uncompressed";
 			if (deviceSerialNumber != "")
 			{
-				videoFilename = videoFilename + "-" + deviceSerialNumber.c_str();
+				videoFilename = videoFilename + "-" + deviceSerialNumber.c_str() + "-" + video_id;
 			}
 
 			break;
@@ -589,7 +593,7 @@ int SaveVectorToVideo(INodeMap & nodeMap, INodeMap & nodeMapTLDevice, vector<Ima
 			videoFilename = "SaveToAvi-MJPG";
 			if (deviceSerialNumber != "")
 			{
-				videoFilename = videoFilename + "-" + deviceSerialNumber.c_str();
+				videoFilename = videoFilename + "-" + deviceSerialNumber.c_str() + "-" + video_id;
 			}
 
 			break;
@@ -598,11 +602,11 @@ int SaveVectorToVideo(INodeMap & nodeMap, INodeMap & nodeMapTLDevice, vector<Ima
 			videoFilename = "SaveToAvi-H264";
 			if (deviceSerialNumber != "")
 			{
-				videoFilename = videoFilename + "-" + deviceSerialNumber.c_str();
+				videoFilename = videoFilename + "-" + deviceSerialNumber.c_str() + "-" + video_id;
 			}
 		}
 
-		//
+		//==========================================================================
 		// Select option and open video file type
 		//
 		// *** NOTES ***
@@ -657,7 +661,7 @@ int SaveVectorToVideo(INodeMap & nodeMap, INodeMap & nodeMapTLDevice, vector<Ima
 			video.Open(videoFilename.c_str(), option);
 		}
 
-		//
+		//==========================================================================
 		// Construct and save video
 		//
 		// *** NOTES ***
@@ -669,11 +673,10 @@ int SaveVectorToVideo(INodeMap & nodeMap, INodeMap & nodeMapTLDevice, vector<Ima
 		for (unsigned int imageCnt = 0; imageCnt < images.size(); imageCnt++)
 		{
 			video.Append(images[imageCnt]);
-
-			cout << "\tAppended image " << imageCnt << "..." << endl;
+			// cout << "\tAppended image " << imageCnt << "..." << endl;
 		}
 
-		//
+		//==========================================================================
 		// Close video file
 		//
 		// *** NOTES ***
@@ -695,20 +698,58 @@ int SaveVectorToVideo(INodeMap & nodeMap, INodeMap & nodeMapTLDevice, vector<Ima
 }
 
 
-// This function acquires and saves 10 images from a camera.  
+// This struct is design for run the thread function SaveVectorToVideoThread
+struct SaveVectorToVideoParam {
+	CameraPtr pCam;
+	vector<ImagePtr> images;
+	unsigned int id; // video id if take several videos
+
+	SaveVectorToVideoParam(CameraPtr _pCam, vector<ImagePtr> _images, unsigned int _id) :
+		pCam(_pCam), images(_images), id(_id){}
+};
+
+
+// This function acquires and saves images from a camera.  
+// only takes care of the WIN32 env
+DWORD WINAPI SaveVectorToVideoThread(LPVOID lpParam)
+{
+	SaveVectorToVideoParam param = *((SaveVectorToVideoParam*)lpParam);
+	CameraPtr pCam = param.pCam;
+	
+	try
+	{
+		INodeMap & nodeMapTLDevice = pCam->GetTLDeviceNodeMap();
+		INodeMap & nodeMap = pCam->GetNodeMap();
+
+		int result = SaveVectorToVideo(nodeMap, nodeMap, param.images, param.id);
+		if (result < 0) {
+			cout << "Failed to save the images to AVI" << endl;
+			return result;
+		}
+
+		return 1;
+	}
+	catch (Spinnaker::Exception &e)
+	{
+		cout << "Error: " << e.what() << endl;
+		return 0;
+	}
+}
+
+// This function acquires and saves images from a camera.  
 #if defined (_WIN32)
 DWORD WINAPI AcquireImages(LPVOID lpParam)
 {
-	int err = 0;
-	int result = 0;
-	vector<ImagePtr> images;
-
     CameraPtr pCam = *((CameraPtr*)lpParam);
 #else
 void* AcquireImages(void* arg)
 {
     CameraPtr pCam = *((CameraPtr*)arg);
 #endif
+	int err = 0;
+	int result = 0;
+
+	vector<ImagePtr> images;
 
     try
     {
@@ -720,7 +761,6 @@ void* AcquireImages(void* arg)
         CStringPtr ptrStringSerial = pCam->GetTLDeviceNodeMap().GetNode("DeviceSerialNumber");
 
         std::string serialNumber = "";
-
         if (IsAvailable(ptrStringSerial) && IsReadable(ptrStringSerial))
         {
             serialNumber = ptrStringSerial->GetValue();
@@ -798,14 +838,13 @@ void* AcquireImages(void* arg)
         }
 
         int64_t acquisitionModeContinuous = ptrAcquisitionModeContinuous->GetValue();
-
         ptrAcquisitionMode->SetIntValue(acquisitionModeContinuous);
 
         cout << "[" << serialNumber << "] " << "Acquisition mode set to continuous..." << endl;
 
-        // Begin acquiring images
 		//=================================================================================
-        pCam->BeginAcquisition();
+		// Begin acquiring images
+		pCam->BeginAcquisition();
 
         cout << "[" << serialNumber << "] " << "Started acquiring images..." << endl;
 
@@ -832,17 +871,17 @@ void* AcquireImages(void* arg)
 			ptrTriggerMode->SetIntValue(ptrTriggerModeOff->GetValue());
 
 			cout << "Trigger mode disabled... And Start Capture" << endl;
-
-
 		}
 		
 
-
-        //
-        // Retrieve, convert, and save images for each camera
-        //
-
+		//==================================================================================
+		// Retrieve, convert, and save images for each camera
+        
         cout << endl;
+		
+		// Create some thread handles
+		HANDLE videoThread = NULL;
+		SaveVectorToVideoParam param = SaveVectorToVideoParam(pCam, images, 0);
 
         for (unsigned int imageCnt = 0; imageCnt < k_numImages; imageCnt++)
         {
@@ -889,6 +928,40 @@ void* AcquireImages(void* arg)
                 // Release image
                 pResultImage->Release();
                 cout << endl;
+
+				// Save images to video every k images
+				if ((imageCnt + 1) % k_savePerNumImages == 0) {
+					unsigned int id = imageCnt / k_savePerNumImages;
+
+					// not first time to create a thread
+					// need to wait and close the handle
+					if (videoThread != NULL) {
+						// Wait for thread to finish
+						WaitForSingleObject(videoThread, INFINITE);
+
+						DWORD exitcode;
+						BOOL rc = GetExitCodeThread(videoThread, &exitcode);
+						if (!rc)
+						{
+							cout << "Handle error from GetExitCodeThread() returned for saving images with camera " << serialNumber << endl;
+						}
+						else if (!exitcode)
+						{
+							cout << "Grab thread for saving images with camera " << serialNumber << " exited with errors."
+								"Please check onscreen print outs for error details" << endl;
+						}
+
+						CloseHandle(videoThread);
+					}
+
+					param = SaveVectorToVideoParam(pCam, images, id);
+
+					videoThread = CreateThread(NULL, 0, SaveVectorToVideoThread, &param, 0, NULL);
+					assert(videoThread != NULL);
+
+					images.clear();
+
+				}
             }
             catch (Spinnaker::Exception &e)
             {
@@ -896,13 +969,32 @@ void* AcquireImages(void* arg)
             }
         }
 
+		/*
 		cout << "Wait 2 seconds to start saving images to AVI." << endl;
 		SleepyWrapper(2);
-		result = SaveVectorToVideo(pCam->GetNodeMap(), nodeMapTLDevice, images);
+		result = SaveVectorToVideo(pCam->GetNodeMap(), nodeMapTLDevice, images, 0);
 		if (result < 0) {
 			cout << "Failed to save the images to AVI" << endl;
 			return result;
 		}
+		*/
+
+		// Wait for thread to finish
+		WaitForSingleObject(videoThread, INFINITE);
+
+		DWORD exitcode;
+		BOOL rc = GetExitCodeThread(videoThread, &exitcode);
+		if (!rc)
+		{
+			cout << "Handle error from GetExitCodeThread() returned for saving images with camera " << serialNumber << endl;
+		}
+		else if (!exitcode)
+		{
+			cout << "Grab thread for saving images with camera " << serialNumber << " exited with errors."
+				"Please check onscreen print outs for error details" << endl;
+		}
+
+		CloseHandle(videoThread);
 
 
         // End acquisition
@@ -926,6 +1018,7 @@ void* AcquireImages(void* arg)
 #endif
     }
 }
+
 
 // This function acts as the body of the example
 int RunMultipleCameras(CameraList camList)
@@ -1030,6 +1123,7 @@ int RunMultipleCameras(CameraList camList)
 
     return result;
 }
+
 
 // Example entry point; please see Enumeration example for more in-depth 
 // comments on preparing and cleaning up the system.
