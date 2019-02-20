@@ -58,8 +58,9 @@ const PixelFormatEnums selectPixelFormat = PixelFormat_BGR8; // PixelFormat_Mono
 const gcstring selectPixelFormatName = "BGR8";
 const int selectFrameRate = 30;
 const videoType chosenVideoType = UNCOMPRESSED;
-const unsigned int k_numImages = 10000;
-const unsigned int k_savePerNumImages = 500;
+const unsigned int k_numImages = 2000;
+// const unsigned int k_savePerNumImages = 100;
+const unsigned int k_threadPerCameraForSaving = 3;
 // ===================================================================================
 
 
@@ -736,6 +737,48 @@ DWORD WINAPI SaveVectorToVideoThread(LPVOID lpParam)
 	}
 }
 
+
+// This struct is design for run the thread function SaveImageThread
+struct SaveImageParam {
+	ImagePtr img;
+	string name;
+
+	SaveImageParam() {
+		img = Image::Create();
+	}
+
+	void releaseImg() {
+		img->Release();
+	}
+};
+
+
+// This function save images use one thread
+DWORD WINAPI SaveImageThread(LPVOID lpParam)
+{
+	SaveImageParam* pParam = (SaveImageParam*)lpParam;
+
+	try
+	{
+		pParam->img->Save(pParam->name.c_str());
+		cout << "Saving image " << pParam->name << endl;
+		// pParam->img->Release();
+		
+		// delete pParam;
+		// pParam = NULL;
+		return 1;
+	}
+	catch (Spinnaker::Exception &e)
+	{
+		// delete pParam;
+		// pParam = NULL;
+
+		cout << "Save Error: " << e.what() << endl;
+		return 0;
+	}
+}
+
+
 // This function acquires and saves images from a camera.  
 #if defined (_WIN32)
 DWORD WINAPI AcquireImages(LPVOID lpParam)
@@ -748,8 +791,6 @@ void* AcquireImages(void* arg)
 #endif
 	int err = 0;
 	int result = 0;
-
-	vector<ImagePtr> images;
 
     try
     {
@@ -880,8 +921,8 @@ void* AcquireImages(void* arg)
         cout << endl;
 		
 		// Create some thread handles
-		HANDLE videoThread = NULL;
-		SaveVectorToVideoParam param = SaveVectorToVideoParam(pCam, images, 0);
+		HANDLE* saveThreads = new HANDLE[k_threadPerCameraForSaving];
+		SaveImageParam pParams[k_threadPerCameraForSaving];
 
         for (unsigned int imageCnt = 0; imageCnt < k_numImages; imageCnt++)
         {
@@ -899,108 +940,106 @@ void* AcquireImages(void* arg)
                     // Convert image to specific format // mono 8
                     ImagePtr convertedImage = pResultImage->Convert(selectPixelFormat, HQ_LINEAR);
 
-					/*
+					
 					//=============================
 					// Save to an image file
 
                     // Create a unique filename
-                    ostringstream filename;
+					string filename = "imgs/";
 
-                    filename << "AcquisitionMultipleThread-";
-                    if (serialNumber != "")
-                    {
-                        filename << serialNumber.c_str();
+                    if (serialNumber != "") {
+                        filename += serialNumber.c_str();
                     }
 
-                    filename << "-" << imageCnt << ".jpg";
+					char buffer[256]; sprintf(buffer, "%06d", imageCnt);
+					string img_id(buffer);
+					filename +=  "/img_" +  img_id +  ".jpg";
 
                     // Save image
-                    convertedImage->Save(filename.str().c_str());
-					*/
+                    // convertedImage->Save(filename.str().c_str());
+					
+					
 
-                    // Print image information
+					int thread_id = imageCnt % k_threadPerCameraForSaving;
+					if (imageCnt / k_threadPerCameraForSaving > 0) {
+						WaitForSingleObject(saveThreads[thread_id], 1);
+						
+						DWORD exitcode;
+
+						BOOL rc = GetExitCodeThread(saveThreads[thread_id], &exitcode);
+						if (!rc)
+						{
+							cout << "Saving " << thread_id << " Handle error from GetExitCodeThread() returned for camera  " << serialNumber << endl;
+						}
+						else if (!exitcode)
+						{
+							cout << "Saving " << thread_id << " Grab thread for camera at index " << serialNumber << " exited with errors."
+								"Please check onscreen print outs for error details" << endl;
+						}
+					}
+
+					pParams[thread_id].name = filename;
+					pParams[thread_id].img->DeepCopy(convertedImage);
+
+					saveThreads[thread_id] = CreateThread(NULL, 0, SaveImageThread, &pParams[thread_id], 0, NULL);
+					assert(saveThreads[thread_id] != NULL);
+
+					// Print image information
 					cout << "[" << serialNumber << "] " << "Grabbed image " << imageCnt << ", width = " << pResultImage->GetWidth() << ", height = " << pResultImage->GetHeight() << endl; //". Image saved at " << filename.str() << endl;
                 
-					// Deep copy image into image vector
-					images.push_back(convertedImage);
 				}
 
                 // Release image
                 pResultImage->Release();
                 cout << endl;
 
-				// Save images to video every k images
-				if ((imageCnt + 1) % k_savePerNumImages == 0) {
-					unsigned int id = imageCnt / k_savePerNumImages;
-
-					// not first time to create a thread
-					// need to wait and close the handle
-					if (videoThread != NULL) {
-						// Wait for thread to finish
-						WaitForSingleObject(videoThread, INFINITE);
-
-						DWORD exitcode;
-						BOOL rc = GetExitCodeThread(videoThread, &exitcode);
-						if (!rc)
-						{
-							cout << "Handle error from GetExitCodeThread() returned for saving images with camera " << serialNumber << endl;
-						}
-						else if (!exitcode)
-						{
-							cout << "Grab thread for saving images with camera " << serialNumber << " exited with errors."
-								"Please check onscreen print outs for error details" << endl;
-						}
-
-						CloseHandle(videoThread);
-					}
-
-					param = SaveVectorToVideoParam(pCam, images, id);
-
-					videoThread = CreateThread(NULL, 0, SaveVectorToVideoThread, &param, 0, NULL);
-					assert(videoThread != NULL);
-
-					images.clear();
-
-				}
             }
             catch (Spinnaker::Exception &e)
             {
+				// End acquisition
+				pCam->EndAcquisition();
+				// Deinitialize camera
+				pCam->DeInit();
+
                 cout << "[" << serialNumber << "] " << "Error: " << e.what() << endl;
             }
         }
 
-		/*
-		cout << "Wait 2 seconds to start saving images to AVI." << endl;
-		SleepyWrapper(2);
-		result = SaveVectorToVideo(pCam->GetNodeMap(), nodeMapTLDevice, images, 0);
-		if (result < 0) {
-			cout << "Failed to save the images to AVI" << endl;
-			return result;
-		}
-		*/
+		// End acquisition
+		pCam->EndAcquisition();
+		// Deinitialize camera
+		pCam->DeInit();
 
-		// Wait for thread to finish
-		WaitForSingleObject(videoThread, INFINITE);
 
-		DWORD exitcode;
-		BOOL rc = GetExitCodeThread(videoThread, &exitcode);
-		if (!rc)
+		// Check thread return code for each camera
+		for (unsigned int i = 0; i < k_threadPerCameraForSaving; i++)
 		{
-			cout << "Handle error from GetExitCodeThread() returned for saving images with camera " << serialNumber << endl;
+			DWORD exitcode;
+
+			BOOL rc = GetExitCodeThread(saveThreads[i], &exitcode);
+			if (!rc)
+			{
+				cout << " Savingall " << i << " Handle error from GetExitCodeThread() returned for camera at index " << serialNumber << endl;
+			}
+			else if (!exitcode)
+			{
+				cout << "Savingall " << i << " Grab thread for camera at index " << serialNumber << " exited with errors."
+					"Please check onscreen print outs for error details" << endl;
+			}
 		}
-		else if (!exitcode)
+
+		// Clear CameraPtr array and close all handles
+		for (unsigned int i = 0; i < k_threadPerCameraForSaving; i++)
 		{
-			cout << "Grab thread for saving images with camera " << serialNumber << " exited with errors."
-				"Please check onscreen print outs for error details" << endl;
+			CloseHandle(saveThreads[i]);
+			// pParams[i].releaseImg();
 		}
 
-		CloseHandle(videoThread);
+		// Delete array pointer
+		delete[] saveThreads;
+		
 
 
-        // End acquisition
-        pCam->EndAcquisition();
-        // Deinitialize camera
-        pCam->DeInit();
 
 #if defined (_WIN32)
         return 1;
