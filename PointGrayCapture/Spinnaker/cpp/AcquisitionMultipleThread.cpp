@@ -51,16 +51,29 @@ enum videoType
 	H264
 };
 
+// Use the following enum and global constant to select whether chunk data is 
+// displayed from the image or the nodemap.
+enum chunkDataType
+{
+	IMAGE,
+	NODEMAP
+};
+
+
 // ===================================================================================
 // ==================================== SELECT =======================================
 // ===================================================================================
+const chunkDataType chosenChunkData = IMAGE;
 const PixelFormatEnums selectPixelFormat = PixelFormat_BGR8; // PixelFormat_Mono8;
+const string serialNumberPrimary = "18565847"; // "18566303";
 const gcstring selectPixelFormatName = "BGR8";
-const int selectFrameRate = 30;
-const videoType chosenVideoType = UNCOMPRESSED;
-const unsigned int k_numImages = 2000;
+const int selectFrameRate = 28;
+const videoType chosenVideoType = MJPG; // UNCOMPRESSED;
+const unsigned int k_numImages = 10;
 // const unsigned int k_savePerNumImages = 100;
-const unsigned int k_threadPerCameraForSaving = 3;
+// const unsigned int k_threadPerCameraForSaving = 3;
+const unsigned int imageHeight = 512; //???
+const unsigned int imageWidth = 640;
 // ===================================================================================
 
 
@@ -108,6 +121,170 @@ int PrintDeviceInfo(INodeMap & nodeMap, std::string camSerial)
     cout << endl;
 
     return result;
+}
+
+
+// This function disables each type of chunk data before disabling chunk data mode. 
+int DisableChunkData(INodeMap & nodeMap)
+{
+	int result = 0;
+	try
+	{
+		NodeList_t entries;
+
+		// Retrieve the selector node
+		CEnumerationPtr ptrChunkSelector = nodeMap.GetNode("ChunkSelector");
+
+		if (!IsAvailable(ptrChunkSelector) || !IsReadable(ptrChunkSelector))
+		{
+			cout << "Unable to retrieve chunk selector. Aborting..." << endl << endl;
+			return -1;
+		}
+
+		// Retrieve entries
+		ptrChunkSelector->GetEntries(entries);
+
+		cout << "Disabling entries..." << endl;
+
+		for (int i = 0; i < entries.size(); i++)
+		{
+			// Select entry to be disabled
+			CEnumEntryPtr ptrChunkSelectorEntry = entries.at(i);
+
+			// Go to next node if problem occurs
+			if (!IsAvailable(ptrChunkSelectorEntry) || !IsReadable(ptrChunkSelectorEntry))
+			{
+				continue;
+			}
+
+			ptrChunkSelector->SetIntValue(ptrChunkSelectorEntry->GetValue());
+
+			cout << "\t" << ptrChunkSelectorEntry->GetSymbolic() << ": ";
+
+			// Retrieve corresponding boolean
+			CBooleanPtr ptrChunkEnable = nodeMap.GetNode("ChunkEnable");
+
+			// Disable the boolean, thus disabling the corresponding chunk data
+			if (!IsAvailable(ptrChunkEnable))
+			{
+				cout << "not available" << endl;
+				result = -1;
+			}
+			else if (!ptrChunkEnable->GetValue())
+			{
+				cout << "disabled" << endl;
+			}
+			else if (IsWritable(ptrChunkEnable))
+			{
+				ptrChunkEnable->SetValue(false);
+				cout << "disabled" << endl;
+			}
+			else
+			{
+				cout << "not writable" << endl;
+			}
+		}
+		cout << endl;
+
+		//Deactivate ChunkMode
+		CBooleanPtr ptrChunkModeActive = nodeMap.GetNode("ChunkModeActive");
+
+		if (!IsAvailable(ptrChunkModeActive) || !IsWritable(ptrChunkModeActive))
+		{
+			cout << "Unable to deactivate chunk mode. Aborting..." << endl << endl;
+			return -1;
+		}
+
+		ptrChunkModeActive->SetValue(false);
+
+		cout << "Chunk mode deactivated..." << endl;
+	}
+	catch (Spinnaker::Exception &e)
+	{
+		cout << "Error: " << e.what() << endl;
+		result = -1;
+	}
+
+	return result;
+}
+
+
+// This function displays a select amount of chunk data from the image. Unlike
+// accessing chunk data via the nodemap, there is no way to loop through all 
+// available data.
+int DisplayChunkData(ImagePtr pImage)
+{
+	int result = 0;
+
+	cout << "Printing chunk data from image..." << endl;
+
+	try
+	{
+		//
+		// Retrieve chunk data from image
+		//
+		// *** NOTES ***
+		// When retrieving chunk data from an image, the data is stored in a
+		// a ChunkData object and accessed with getter functions.
+		//
+		ChunkData chunkData = pImage->GetChunkData();
+
+		//
+		// Retrieve exposure time; exposure time recorded in microseconds
+		//
+		// *** NOTES ***
+		// Floating point numbers are returned as a float64_t. This can safely
+		// and easily be statically cast to a double.
+		//
+		double exposureTime = static_cast<double>(chunkData.GetExposureTime());
+		std::cout << "\tExposure time: " << exposureTime << endl;
+
+		//
+		// Retrieve frame ID
+		//
+		// *** NOTES ***
+		// Integers are returned as an int64_t. As this is the typical integer
+		// data type used in the Spinnaker SDK, there is no need to cast it.
+		//
+		int64_t frameID = chunkData.GetFrameID();
+		cout << "\tFrame ID: " << frameID << "\n";
+
+		// Retrieve gain; gain recorded in decibels
+		double gain = chunkData.GetGain();
+		cout << "\tGain: " << gain << "\n";
+
+		// Retrieve height; height recorded in pixels
+		int64_t height = chunkData.GetHeight();
+		cout << "\tHeight: " << height << "\n";
+
+		// Retrieve width; width recorded in pixels
+		int64_t width = chunkData.GetWidth();
+		cout << "\tWidth: " << width << "\n";
+
+		// Retrieve offset X; offset X recorded in pixels
+		int64_t offsetX = chunkData.GetOffsetX();
+		cout << "\tOffset X: " << offsetX << "\n";
+
+		// Retrieve offset Y; offset Y recorded in pixels
+		int64_t offsetY = chunkData.GetOffsetY();
+		cout << "\tOffset Y: " << offsetY << "\n";
+
+		// Retrieve sequencer set active
+		int64_t sequencerSetActive = chunkData.GetSequencerSetActive();
+		cout << "\tSequencer set active: " << sequencerSetActive << "\n";
+
+		// Retrieve timestamp
+		uint64_t timestamp = chunkData.GetTimestamp();
+		cout << "\tTimestamp: " << timestamp << endl;
+
+	}
+	catch (Spinnaker::Exception &e)
+	{
+		cout << "Error: " << e.what() << endl;
+		result = -1;
+	}
+
+	return result;
 }
 
 #ifdef _DEBUG
@@ -163,6 +340,119 @@ int DisableHeartbeat(CameraPtr pCam, INodeMap & nodeMap, INodeMap & nodeMapTLDev
     return 0;
 }
 #endif
+
+
+// This function configures the camera to add chunk data to each image. It does 
+// this by enabling each type of chunk data before enabling chunk data mode. 
+// When chunk data is turned on, the data is made available in both the nodemap 
+// and each image.
+int ConfigureChunkData(INodeMap & nodeMap)
+{
+	int result = 0;
+
+	cout << endl << endl << "*** CONFIGURING CHUNK DATA ***" << endl << endl;
+
+	try
+	{
+		//
+		// Activate chunk mode
+		//
+		// *** NOTES ***
+		// Once enabled, chunk data will be available at the end of the payload
+		// of every image captured until it is disabled. Chunk data can also be 
+		// retrieved from the nodemap.
+		//
+		CBooleanPtr ptrChunkModeActive = nodeMap.GetNode("ChunkModeActive");
+
+		if (!IsAvailable(ptrChunkModeActive) || !IsWritable(ptrChunkModeActive))
+		{
+			cout << "Unable to activate chunk mode. Aborting..." << endl << endl;
+			return -1;
+		}
+
+		ptrChunkModeActive->SetValue(true);
+
+		cout << "Chunk mode activated..." << endl;
+
+		//
+		// Enable all types of chunk data
+		//
+		// *** NOTES ***
+		// Enabling chunk data requires working with nodes: "ChunkSelector"
+		// is an enumeration selector node and "ChunkEnable" is a boolean. It
+		// requires retrieving the selector node (which is of enumeration node 
+		// type), selecting the entry of the chunk data to be enabled, retrieving 
+		// the corresponding boolean, and setting it to true. 
+		//
+		// In this example, all chunk data is enabled, so these steps are 
+		// performed in a loop. Once this is complete, chunk mode still needs to
+		// be activated.
+		//
+		NodeList_t entries;
+
+		// Retrieve the selector node
+		CEnumerationPtr ptrChunkSelector = nodeMap.GetNode("ChunkSelector");
+
+		if (!IsAvailable(ptrChunkSelector) || !IsReadable(ptrChunkSelector))
+		{
+			cout << "Unable to retrieve chunk selector. Aborting..." << endl << endl;
+			return -1;
+		}
+
+		// Retrieve entries
+		ptrChunkSelector->GetEntries(entries);
+
+		cout << "Enabling entries..." << endl;
+
+		for (int i = 0; i < entries.size(); i++)
+		{
+			// Select entry to be enabled
+			CEnumEntryPtr ptrChunkSelectorEntry = entries.at(i);
+
+			// Go to next node if problem occurs
+			if (!IsAvailable(ptrChunkSelectorEntry) || !IsReadable(ptrChunkSelectorEntry))
+			{
+				continue;
+			}
+
+			ptrChunkSelector->SetIntValue(ptrChunkSelectorEntry->GetValue());
+
+			cout << "\t" << ptrChunkSelectorEntry->GetSymbolic() << ": ";
+
+			// Retrieve corresponding boolean
+			CBooleanPtr ptrChunkEnable = nodeMap.GetNode("ChunkEnable");
+
+			// Enable the boolean, thus enabling the corresponding chunk data
+			if (!IsAvailable(ptrChunkEnable))
+			{
+				cout << "not available" << endl;
+				result = -1;
+			}
+			else if (ptrChunkEnable->GetValue())
+			{
+				cout << "enabled" << endl;
+			}
+			else if (IsWritable(ptrChunkEnable))
+			{
+				ptrChunkEnable->SetValue(true);
+				cout << "enabled" << endl;
+			}
+			else
+			{
+				cout << "not writable" << endl;
+				result = -1;
+			}
+		}
+	}
+	catch (Spinnaker::Exception &e)
+	{
+		cout << "Error: " << e.what() << endl;
+		result = -1;
+	}
+
+	return result;
+}
+
 
 
 // This function configures the camera to use a trigger. First, trigger mode is 
@@ -476,7 +766,7 @@ int ConfigureCustomImageSettings(INodeMap & nodeMap)
 		// there is no reason to check against the increment.
 		//
 
-		/*
+		
 		CIntegerPtr ptrWidth = nodeMap.GetNode("Width");
 		if (IsAvailable(ptrWidth) && IsWritable(ptrWidth))
 		{
@@ -490,7 +780,7 @@ int ConfigureCustomImageSettings(INodeMap & nodeMap)
 		{
 			cout << "Width not available..." << endl;
 		}
-		*/
+		
 
 		//==========================================================================
 		// Set maximum height
@@ -500,7 +790,7 @@ int ConfigureCustomImageSettings(INodeMap & nodeMap)
 		// maximum should always be a multiple of its increment.
 		//
 
-		/*
+		
 		CIntegerPtr ptrHeight = nodeMap.GetNode("Height");
 		if (IsAvailable(ptrHeight) && IsWritable(ptrHeight))
 		{
@@ -514,7 +804,7 @@ int ConfigureCustomImageSettings(INodeMap & nodeMap)
 		{
 			cout << "Height not available..." << endl << endl;
 		}
-		*/
+		
 	}
 	catch (Spinnaker::Exception &e)
 	{
@@ -524,6 +814,151 @@ int ConfigureCustomImageSettings(INodeMap & nodeMap)
 
 	return result;
 }
+
+
+// Configure Video Settings
+int ConfigureVideoAndOpen(SpinVideo & video, INodeMap & nodeMap, INodeMap & nodeMapTLDevice)
+{
+	int result = 0;
+
+	cout << endl << endl << "*** CREATING VIDEO ***" << endl << endl;
+
+	try
+	{
+		// Retrieve device serial number for filename
+		string deviceSerialNumber = "";
+
+		CStringPtr ptrStringSerial = nodeMapTLDevice.GetNode("DeviceSerialNumber");
+		if (IsAvailable(ptrStringSerial) && IsReadable(ptrStringSerial))
+		{
+			deviceSerialNumber = ptrStringSerial->GetValue();
+
+			cout << "Device serial number retrieved as " << deviceSerialNumber << "..." << endl;
+		}
+
+		//
+		// Get the current frame rate; acquisition frame rate recorded in hertz
+		//
+		// *** NOTES ***
+		// The video frame rate can be set to anything; however, in order to
+		// have videos play in real-time, the acquisition frame rate can be
+		// retrieved from the camera.
+		//
+		CFloatPtr ptrAcquisitionFrameRate = nodeMap.GetNode("AcquisitionFrameRate");
+		if (!IsAvailable(ptrAcquisitionFrameRate) || !IsReadable(ptrAcquisitionFrameRate))
+		{
+			cout << "Unable to retrieve frame rate. Aborting..." << endl << endl;
+			return -1;
+		}
+
+		float frameRateToSet = static_cast<float>(ptrAcquisitionFrameRate->GetValue());
+
+		cout << "Frame rate to be set to " << frameRateToSet << "..." << endl;
+
+		//==========================================================================
+		// Create a unique filename
+		//
+		// *** NOTES ***
+		// This example creates filenames according to the type of video
+		// being created. Notice that '.avi' does not need to be appended to the
+		// name of the file. This is because the SpinVideo object takes care
+		// of the file extension automatically.
+		//
+		string videoFilename = "F:\\temp\\test_sync\\";
+
+		switch (chosenVideoType)
+		{
+		case UNCOMPRESSED:
+			videoFilename += "SaveToAvi-Uncompressed";
+			if (deviceSerialNumber != "")
+			{
+				videoFilename = videoFilename + "-" + deviceSerialNumber.c_str();
+			}
+
+			break;
+
+		case MJPG:
+			videoFilename += "SaveToAvi-MJPG";
+			if (deviceSerialNumber != "")
+			{
+				videoFilename = videoFilename + "-" + deviceSerialNumber.c_str();
+			}
+
+			break;
+
+		case H264:
+			videoFilename += "SaveToAvi-H264";
+			if (deviceSerialNumber != "")
+			{
+				videoFilename = videoFilename + "-" + deviceSerialNumber.c_str();
+			}
+		}
+
+		//==========================================================================
+		// Select option and open video file type
+		//
+		// *** NOTES ***
+		// Depending on the file type, a number of settings need to be set in
+		// an object called an option. An uncompressed option only needs to
+		// have the video frame rate set whereas videos with MJPG or H264
+		// compressions should have more values set.
+		//
+		// Once the desired option object is configured, open the video file
+		// with the option in order to create the video file.
+		//
+		// *** LATER ***
+		// Once all images have been added, it is important to close the file -
+		// this is similar to many other standard file streams.
+		//
+		// SpinVideo video;
+
+		// Set maximum video file size to 2GB.
+		// A new video file is generated when 2GB
+		// limit is reached. Setting maximum file
+		// size to 0 indicates no limit.
+		const unsigned int k_videoFileSize = 2048;
+
+		video.SetMaximumFileSize(k_videoFileSize);
+
+		if (chosenVideoType == UNCOMPRESSED)
+		{
+			Video::AVIOption option;
+
+			option.frameRate = frameRateToSet;
+
+			video.Open(videoFilename.c_str(), option);
+		}
+		else if (chosenVideoType == MJPG)
+		{
+			Video::MJPGOption option;
+
+			option.frameRate = frameRateToSet;
+			option.quality = 75;
+
+			video.Open(videoFilename.c_str(), option);
+		}
+		else if (chosenVideoType == H264)
+		{
+			Video::H264Option option;
+
+			option.frameRate = frameRateToSet;
+			option.bitrate = 1000000;
+			option.height = static_cast<unsigned int>(imageHeight);
+			option.width = static_cast<unsigned int>(imageWidth);
+
+			video.Open(videoFilename.c_str(), option);
+		}
+
+	}
+	catch (Spinnaker::Exception &e)
+	{
+		cout << "Error: " << e.what() << endl;
+		result = -1;
+	}
+
+	return result;
+}
+
 
 
 // This function prepares, saves, and cleans up an video from a vector of images.
@@ -761,18 +1196,11 @@ DWORD WINAPI SaveImageThread(LPVOID lpParam)
 	try
 	{
 		pParam->img->Save(pParam->name.c_str());
-		cout << "Saving image " << pParam->name << endl;
-		// pParam->img->Release();
-		
-		// delete pParam;
-		// pParam = NULL;
+		// cout << "Saving image " << pParam->name << endl;
 		return 1;
 	}
 	catch (Spinnaker::Exception &e)
 	{
-		// delete pParam;
-		// pParam = NULL;
-
 		cout << "Save Error: " << e.what() << endl;
 		return 0;
 	}
@@ -809,7 +1237,6 @@ void* AcquireImages(void* arg)
 
         cout << endl << "[" << serialNumber << "] " << "*** IMAGE ACQUISITION THREAD STARTING" << " ***" << endl << endl;
 
-		std::string serialNumberPrimary = "18565847"; // "18566303";
 		bool is_primary = (serialNumber == serialNumberPrimary);
 
         // Print device information
@@ -821,10 +1248,12 @@ void* AcquireImages(void* arg)
 
 		// Configure custom image settings
 		err = ConfigureCustomImageSettings(pCam->GetNodeMap());
-		if (err < 0)
-		{
-			return err;
-		}
+		if (err < 0) return err;
+
+		// Configure chuck data setting
+		err = ConfigureChunkData(pCam->GetNodeMap());
+		// pCam->TimestampReset();
+		if (err < 0) return err;
 
 		// Change Camera settings
 		pCam->AcquisitionFrameRateEnable = true;
@@ -834,10 +1263,7 @@ void* AcquireImages(void* arg)
 		// Configure trigger
 
 		err = ConfigureTrigger(pCam->GetNodeMap(), is_primary);
-		if (err < 0)
-		{
-			return err;
-		}
+		if (err < 0) return err;
 
 #ifdef _DEBUG
         cout << endl << endl << "*** DEBUG ***" << endl << endl;
@@ -883,6 +1309,13 @@ void* AcquireImages(void* arg)
 
         cout << "[" << serialNumber << "] " << "Acquisition mode set to continuous..." << endl;
 
+
+		//=================================================================================
+		// Init and open Video
+		SpinVideo video;
+		result = ConfigureVideoAndOpen(video, pCam->GetNodeMap(), nodeMapTLDevice);
+
+
 		//=================================================================================
 		// Begin acquiring images
 		pCam->BeginAcquisition();
@@ -920,10 +1353,6 @@ void* AcquireImages(void* arg)
         
         cout << endl;
 		
-		// Create some thread handles
-		HANDLE* saveThreads = new HANDLE[k_threadPerCameraForSaving];
-		SaveImageParam pParams[k_threadPerCameraForSaving];
-
         for (unsigned int imageCnt = 0; imageCnt < k_numImages; imageCnt++)
         {
             try
@@ -937,13 +1366,12 @@ void* AcquireImages(void* arg)
                 }
                 else
                 {
-                    // Convert image to specific format // mono 8
                     ImagePtr convertedImage = pResultImage->Convert(selectPixelFormat, HQ_LINEAR);
 
 					
 					//=============================
 					// Save to an image file
-
+					/*
                     // Create a unique filename
 					string filename = "imgs/";
 
@@ -954,44 +1382,22 @@ void* AcquireImages(void* arg)
 					char buffer[256]; sprintf(buffer, "%06d", imageCnt);
 					string img_id(buffer);
 					filename +=  "/img_" +  img_id +  ".jpg";
-
+					*/
                     // Save image
                     // convertedImage->Save(filename.str().c_str());
-					
-					
 
-					int thread_id = imageCnt % k_threadPerCameraForSaving;
-					if (imageCnt / k_threadPerCameraForSaving > 0) {
-						WaitForSingleObject(saveThreads[thread_id], 1);
-						
-						DWORD exitcode;
+					// Append image to video
+					video.Append(convertedImage);
 
-						BOOL rc = GetExitCodeThread(saveThreads[thread_id], &exitcode);
-						if (!rc)
-						{
-							cout << "Saving " << thread_id << " Handle error from GetExitCodeThread() returned for camera  " << serialNumber << endl;
-						}
-						else if (!exitcode)
-						{
-							cout << "Saving " << thread_id << " Grab thread for camera at index " << serialNumber << " exited with errors."
-								"Please check onscreen print outs for error details" << endl;
-						}
-					}
-
-					pParams[thread_id].name = filename;
-					pParams[thread_id].img->DeepCopy(convertedImage);
-
-					saveThreads[thread_id] = CreateThread(NULL, 0, SaveImageThread, &pParams[thread_id], 0, NULL);
-					assert(saveThreads[thread_id] != NULL);
+					result = DisplayChunkData(pResultImage);
 
 					// Print image information
-					cout << "[" << serialNumber << "] " << "Grabbed image " << imageCnt << ", width = " << pResultImage->GetWidth() << ", height = " << pResultImage->GetHeight() << endl; //". Image saved at " << filename.str() << endl;
-                
+					if((imageCnt+1) % 10 == 0)
+						cout << "[" << serialNumber << "] " << "Grabbed image " << imageCnt << ", width = " << pResultImage->GetWidth() << ", height = " << pResultImage->GetHeight() << endl; //". Image saved at " << filename.str() << endl;
+					
+					
 				}
 
-                // Release image
-                pResultImage->Release();
-                cout << endl;
 
             }
             catch (Spinnaker::Exception &e)
@@ -1010,34 +1416,10 @@ void* AcquireImages(void* arg)
 		// Deinitialize camera
 		pCam->DeInit();
 
-
-		// Check thread return code for each camera
-		for (unsigned int i = 0; i < k_threadPerCameraForSaving; i++)
-		{
-			DWORD exitcode;
-
-			BOOL rc = GetExitCodeThread(saveThreads[i], &exitcode);
-			if (!rc)
-			{
-				cout << " Savingall " << i << " Handle error from GetExitCodeThread() returned for camera at index " << serialNumber << endl;
-			}
-			else if (!exitcode)
-			{
-				cout << "Savingall " << i << " Grab thread for camera at index " << serialNumber << " exited with errors."
-					"Please check onscreen print outs for error details" << endl;
-			}
-		}
-
-		// Clear CameraPtr array and close all handles
-		for (unsigned int i = 0; i < k_threadPerCameraForSaving; i++)
-		{
-			CloseHandle(saveThreads[i]);
-			// pParams[i].releaseImg();
-		}
-
-		// Delete array pointer
-		delete[] saveThreads;
+		err = DisableChunkData(pCam->GetNodeMap());
+		if (err < 0) return err;
 		
+		video.Close();
 
 
 
