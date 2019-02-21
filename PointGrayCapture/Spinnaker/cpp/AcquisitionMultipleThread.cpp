@@ -29,6 +29,7 @@
 #include "Spinnaker.h"
 #include "SpinGenApi/SpinnakerGenApi.h"
 #include <iostream>
+#include <fstream>
 #include <sstream> 
 #include "SpinVideo.h"
 
@@ -70,10 +71,13 @@ const gcstring selectPixelFormatName = "BGR8";
 const int selectFrameRate = 28;
 const videoType chosenVideoType = MJPG; // UNCOMPRESSED;
 const unsigned int k_numImages = 10;
+const unsigned int k_numPrintInfo = 20;
 // const unsigned int k_savePerNumImages = 100;
 // const unsigned int k_threadPerCameraForSaving = 3;
 const unsigned int imageHeight = 512; //???
 const unsigned int imageWidth = 640;
+
+const string outputFolder = "F:\\temp\\test_sync\\";
 // ===================================================================================
 
 
@@ -95,32 +99,32 @@ void SleepyWrapper(int milliseconds)
 // device information from the nodemap.
 int PrintDeviceInfo(INodeMap & nodeMap, std::string camSerial)
 {
-    int result = 0;
+	int result = 0;
 
-    cout << "[" << camSerial << "] Printing device information ..." << endl << endl;
+	cout << "[" << camSerial << "] Printing device information ..." << endl << endl;
 
-    FeatureList_t features;
-    CCategoryPtr category = nodeMap.GetNode("DeviceInformation");
-    if (IsAvailable(category) && IsReadable(category))
-    {
-        category->GetFeatures(features);
+	FeatureList_t features;
+	CCategoryPtr category = nodeMap.GetNode("DeviceInformation");
+	if (IsAvailable(category) && IsReadable(category))
+	{
+		category->GetFeatures(features);
 
-        FeatureList_t::const_iterator it;
-        for (it = features.begin(); it != features.end(); ++it)
-        {
-            CNodePtr pfeatureNode = *it;
-            CValuePtr pValue = (CValuePtr)pfeatureNode;
-            cout << "[" << camSerial << "] " << pfeatureNode->GetName() << " : " << (IsReadable(pValue) ? pValue->ToString() : "Node not readable") << endl;
-        }
-    }
-    else
-    {
-        cout << "[" << camSerial << "] " << "Device control information not available." << endl;
-    }
+		FeatureList_t::const_iterator it;
+		for (it = features.begin(); it != features.end(); ++it)
+		{
+			CNodePtr pfeatureNode = *it;
+			CValuePtr pValue = (CValuePtr)pfeatureNode;
+			cout << "[" << camSerial << "] " << pfeatureNode->GetName() << " : " << (IsReadable(pValue) ? pValue->ToString() : "Node not readable") << endl;
+		}
+	}
+	else
+	{
+		cout << "[" << camSerial << "] " << "Device control information not available." << endl;
+	}
 
-    cout << endl;
+	cout << endl;
 
-    return result;
+	return result;
 }
 
 
@@ -212,12 +216,11 @@ int DisableChunkData(INodeMap & nodeMap)
 // This function displays a select amount of chunk data from the image. Unlike
 // accessing chunk data via the nodemap, there is no way to loop through all 
 // available data.
-int DisplayChunkData(ImagePtr pImage)
+int DisplayChunkData(ImagePtr pImage, ofstream& logFile, int frame_id)
 {
 	int result = 0;
 
-	cout << "Printing chunk data from image..." << endl;
-
+	logFile << "Frame ID " << frame_id << "\n";
 	try
 	{
 		//
@@ -237,7 +240,7 @@ int DisplayChunkData(ImagePtr pImage)
 		// and easily be statically cast to a double.
 		//
 		double exposureTime = static_cast<double>(chunkData.GetExposureTime());
-		std::cout << "\tExposure time: " << exposureTime << endl;
+		logFile << "\tExposure time: " << exposureTime << "\n";
 
 		//
 		// Retrieve frame ID
@@ -247,36 +250,37 @@ int DisplayChunkData(ImagePtr pImage)
 		// data type used in the Spinnaker SDK, there is no need to cast it.
 		//
 		int64_t frameID = chunkData.GetFrameID();
-		cout << "\tFrame ID: " << frameID << "\n";
+		logFile << "\tFrame ID: " << frameID << "\n";
 
 		// Retrieve gain; gain recorded in decibels
 		double gain = chunkData.GetGain();
-		cout << "\tGain: " << gain << "\n";
+		logFile << "\tGain: " << gain << "\n";
 
 		// Retrieve height; height recorded in pixels
 		int64_t height = chunkData.GetHeight();
-		cout << "\tHeight: " << height << "\n";
+		logFile << "\tHeight: " << height << "\n";
 
 		// Retrieve width; width recorded in pixels
 		int64_t width = chunkData.GetWidth();
-		cout << "\tWidth: " << width << "\n";
+		logFile << "\tWidth: " << width << "\n";
 
 		// Retrieve offset X; offset X recorded in pixels
 		int64_t offsetX = chunkData.GetOffsetX();
-		cout << "\tOffset X: " << offsetX << "\n";
+		logFile << "\tOffset X: " << offsetX << "\n";
 
 		// Retrieve offset Y; offset Y recorded in pixels
 		int64_t offsetY = chunkData.GetOffsetY();
-		cout << "\tOffset Y: " << offsetY << "\n";
+		logFile << "\tOffset Y: " << offsetY << "\n";
 
 		// Retrieve sequencer set active
 		int64_t sequencerSetActive = chunkData.GetSequencerSetActive();
-		cout << "\tSequencer set active: " << sequencerSetActive << "\n";
+		logFile << "\tSequencer set active: " << sequencerSetActive << "\n";
 
 		// Retrieve timestamp
 		uint64_t timestamp = chunkData.GetTimestamp();
-		cout << "\tTimestamp: " << timestamp << endl;
+		logFile << "\tTimestamp: " << timestamp << "\n";
 
+		logFile << endl;
 	}
 	catch (Spinnaker::Exception &e)
 	{
@@ -291,53 +295,53 @@ int DisplayChunkData(ImagePtr pImage)
 // Disables heartbeat on GEV cameras so debugging does not incur timeout errors
 int DisableHeartbeat(CameraPtr pCam, INodeMap & nodeMap, INodeMap & nodeMapTLDevice)
 {
-    cout << "Checking device type to see if we need to disable the camera's heartbeat..." << endl << endl;
-    //
-    // Write to boolean node controlling the camera's heartbeat
-    // 
-    // *** NOTES ***
-    // This applies only to GEV cameras and only applies when in DEBUG mode.
-    // GEV cameras have a heartbeat built in, but when debugging applications the
-    // camera may time out due to its heartbeat. Disabling the heartbeat prevents 
-    // this timeout from occurring, enabling us to continue with any necessary debugging.
-    // This procedure does not affect other types of cameras and will prematurely exit
-    // if it determines the device in question is not a GEV camera. 
-    //
-    // *** LATER ***
-    // Since we only disable the heartbeat on GEV cameras during debug mode, it is better
-    // to power cycle the camera after debugging. A power cycle will reset the camera 
-    // to its default settings. 
-    // 
+	cout << "Checking device type to see if we need to disable the camera's heartbeat..." << endl << endl;
+	//
+	// Write to boolean node controlling the camera's heartbeat
+	// 
+	// *** NOTES ***
+	// This applies only to GEV cameras and only applies when in DEBUG mode.
+	// GEV cameras have a heartbeat built in, but when debugging applications the
+	// camera may time out due to its heartbeat. Disabling the heartbeat prevents 
+	// this timeout from occurring, enabling us to continue with any necessary debugging.
+	// This procedure does not affect other types of cameras and will prematurely exit
+	// if it determines the device in question is not a GEV camera. 
+	//
+	// *** LATER ***
+	// Since we only disable the heartbeat on GEV cameras during debug mode, it is better
+	// to power cycle the camera after debugging. A power cycle will reset the camera 
+	// to its default settings. 
+	// 
 
-    CEnumerationPtr ptrDeviceType = nodeMapTLDevice.GetNode("DeviceType");
-    if (!IsAvailable(ptrDeviceType) && !IsReadable(ptrDeviceType))
-    {
-        cout << "Error with reading the device's type. Aborting..." << endl << endl;
-        return -1;
-    }
-    else
-    {
-        if (ptrDeviceType->GetIntValue() == DeviceType_GEV)
-        {
-            cout << "Working with a GigE camera. Attempting to disable heartbeat before continuing..." << endl << endl;
-            CBooleanPtr ptrDeviceHeartbeat = nodeMap.GetNode("GevGVCPHeartbeatDisable");
-            if (!IsAvailable(ptrDeviceHeartbeat) || !IsWritable(ptrDeviceHeartbeat))
-            {
-                cout << "Unable to disable heartbeat on camera. Continuing with execution as this may be non-fatal..." << endl << endl;
-            }
-            else
-            {
-                ptrDeviceHeartbeat->SetValue(true);
-                cout << "WARNING: Heartbeat on GigE camera disabled for the rest of Debug Mode." << endl;
-                cout << "         Power cycle camera when done debugging to re-enable the heartbeat..." << endl << endl;
-            }
-        }
-        else
-        {
-            cout << "Camera does not use GigE interface. Resuming normal execution..." << endl << endl;
-        }
-    }
-    return 0;
+	CEnumerationPtr ptrDeviceType = nodeMapTLDevice.GetNode("DeviceType");
+	if (!IsAvailable(ptrDeviceType) && !IsReadable(ptrDeviceType))
+	{
+		cout << "Error with reading the device's type. Aborting..." << endl << endl;
+		return -1;
+	}
+	else
+	{
+		if (ptrDeviceType->GetIntValue() == DeviceType_GEV)
+		{
+			cout << "Working with a GigE camera. Attempting to disable heartbeat before continuing..." << endl << endl;
+			CBooleanPtr ptrDeviceHeartbeat = nodeMap.GetNode("GevGVCPHeartbeatDisable");
+			if (!IsAvailable(ptrDeviceHeartbeat) || !IsWritable(ptrDeviceHeartbeat))
+			{
+				cout << "Unable to disable heartbeat on camera. Continuing with execution as this may be non-fatal..." << endl << endl;
+			}
+			else
+			{
+				ptrDeviceHeartbeat->SetValue(true);
+				cout << "WARNING: Heartbeat on GigE camera disabled for the rest of Debug Mode." << endl;
+				cout << "         Power cycle camera when done debugging to re-enable the heartbeat..." << endl << endl;
+			}
+		}
+		else
+		{
+			cout << "Camera does not use GigE interface. Resuming normal execution..." << endl << endl;
+		}
+	}
+	return 0;
 }
 #endif
 
@@ -461,12 +465,12 @@ int ConfigureChunkData(INodeMap & nodeMap)
 // capture only a single image upon the execution of the chosen trigger.
 int ConfigureTrigger(INodeMap & nodeMap, bool is_primary)
 {
-    int result = 0;
+	int result = 0;
 
-    cout << endl << endl << "*** CONFIGURING TRIGGER ***" << endl << endl;
+	cout << endl << endl << "*** CONFIGURING TRIGGER ***" << endl << endl;
 
-    try
-    {
+	try
+	{
 
 		//
 		// Ensure trigger mode off
@@ -511,51 +515,51 @@ int ConfigureTrigger(INodeMap & nodeMap, bool is_primary)
 			cout << "Digital IO Control line selection select Line2" << endl;
 		}
 
-        //
-        // Select trigger source
-        //
-        // *** NOTES ***
-        CEnumerationPtr ptrTriggerSource = nodeMap.GetNode("TriggerSource");
-        if (!IsAvailable(ptrTriggerSource) || !IsWritable(ptrTriggerSource))
-        {
-            cout << "Unable to set trigger mode (node retrieval). Aborting..." << endl;
-            return -1;
-        }
+		//
+		// Select trigger source
+		//
+		// *** NOTES ***
+		CEnumerationPtr ptrTriggerSource = nodeMap.GetNode("TriggerSource");
+		if (!IsAvailable(ptrTriggerSource) || !IsWritable(ptrTriggerSource))
+		{
+			cout << "Unable to set trigger mode (node retrieval). Aborting..." << endl;
+			return -1;
+		}
 
-        if (is_primary)
-        {
-            // Set trigger mode to software
-            CEnumEntryPtr ptrTriggerSourceSoftware = ptrTriggerSource->GetEntryByName("Software");
-            if (!IsAvailable(ptrTriggerSourceSoftware) || !IsReadable(ptrTriggerSourceSoftware))
-            {
-                cout << "Unable to set trigger mode (enum entry retrieval). Aborting..." << endl;
-                return -1;
-            }
+		if (is_primary)
+		{
+			// Set trigger mode to software
+			CEnumEntryPtr ptrTriggerSourceSoftware = ptrTriggerSource->GetEntryByName("Software");
+			if (!IsAvailable(ptrTriggerSourceSoftware) || !IsReadable(ptrTriggerSourceSoftware))
+			{
+				cout << "Unable to set trigger mode (enum entry retrieval). Aborting..." << endl;
+				return -1;
+			}
 
-            ptrTriggerSource->SetIntValue(ptrTriggerSourceSoftware->GetValue());
+			ptrTriggerSource->SetIntValue(ptrTriggerSourceSoftware->GetValue());
 
-            cout << "Trigger source set to software..." << endl;
-        }
-        else
-        {
-            // Set trigger mode to hardware ('Line3')
-            CEnumEntryPtr ptrTriggerSourceHardware = ptrTriggerSource->GetEntryByName("Line3");
-            if (!IsAvailable(ptrTriggerSourceHardware) || !IsReadable(ptrTriggerSourceHardware))
-            {
-                cout << "Unable to set trigger mode (enum entry retrieval). Aborting..." << endl;
-                return -1;
-            }
-			
+			cout << "Trigger source set to software..." << endl;
+		}
+		else
+		{
+			// Set trigger mode to hardware ('Line3')
+			CEnumEntryPtr ptrTriggerSourceHardware = ptrTriggerSource->GetEntryByName("Line3");
+			if (!IsAvailable(ptrTriggerSourceHardware) || !IsReadable(ptrTriggerSourceHardware))
+			{
+				cout << "Unable to set trigger mode (enum entry retrieval). Aborting..." << endl;
+				return -1;
+			}
+
 			ptrTriggerSource->SetIntValue(ptrTriggerSourceHardware->GetValue());
-            cout << "Trigger source set to Line 3..." << endl;
+			cout << "Trigger source set to Line 3..." << endl;
 
 			// Set trigger overlap to read out
 			CEnumerationPtr ptrTiggerOverlap = nodeMap.GetNode("TriggerOverlap");
 			if (!IsAvailable(ptrTiggerOverlap) || !IsReadable(ptrTiggerOverlap))
-            {
-                cout << "Unable to set trigger overlap (mode retrieval). Aborting..." << endl;
-                return -1;
-            }
+			{
+				cout << "Unable to set trigger overlap (mode retrieval). Aborting..." << endl;
+				return -1;
+			}
 			CEnumEntryPtr ptrTiggerOverlapReadOut = ptrTiggerOverlap->GetEntryByName("ReadOut");
 			if (!IsAvailable(ptrTiggerOverlapReadOut) || !IsReadable(ptrTiggerOverlapReadOut))
 			{
@@ -566,36 +570,36 @@ int ConfigureTrigger(INodeMap & nodeMap, bool is_primary)
 			ptrTiggerOverlap->SetIntValue(ptrTiggerOverlapReadOut->GetValue());
 			cout << "Trigger overlap set to Readout..." << endl;
 
-        }
+		}
 
-        //
-        // Turn trigger mode on
-        //
-        // *** LATER ***
-        // Once the appropriate trigger source has been set, turn trigger mode 
-        // on in order to retrieve images using the trigger.
-        //
+		//
+		// Turn trigger mode on
+		//
+		// *** LATER ***
+		// Once the appropriate trigger source has been set, turn trigger mode 
+		// on in order to retrieve images using the trigger.
+		//
 
-        CEnumEntryPtr ptrTriggerModeOn = ptrTriggerMode->GetEntryByName("On");
-        if (!IsAvailable(ptrTriggerModeOn) || !IsReadable(ptrTriggerModeOn))
-        {
-            cout << "Unable to enable trigger mode (enum entry retrieval). Aborting..." << endl;
-            return -1;
-        }
+		CEnumEntryPtr ptrTriggerModeOn = ptrTriggerMode->GetEntryByName("On");
+		if (!IsAvailable(ptrTriggerModeOn) || !IsReadable(ptrTriggerModeOn))
+		{
+			cout << "Unable to enable trigger mode (enum entry retrieval). Aborting..." << endl;
+			return -1;
+		}
 
-        ptrTriggerMode->SetIntValue(ptrTriggerModeOn->GetValue());
+		ptrTriggerMode->SetIntValue(ptrTriggerModeOn->GetValue());
 
-        // TODO: Blackfly and Flea3 GEV cameras need 1 second delay after trigger mode is turned on 
+		// TODO: Blackfly and Flea3 GEV cameras need 1 second delay after trigger mode is turned on 
 
-        cout << "Trigger mode turned back on..." << endl << endl;
-    }
-    catch (Spinnaker::Exception &e)
-    {
-        cout << "Error: " << e.what() << endl;
-        result = -1;
-    }
+		cout << "Trigger mode turned back on..." << endl << endl;
+	}
+	catch (Spinnaker::Exception &e)
+	{
+		cout << "Error: " << e.what() << endl;
+		result = -1;
+	}
 
-    return result;
+	return result;
 }
 
 // This function retrieves a single image using the trigger. In this example, 
@@ -607,51 +611,51 @@ int ConfigureTrigger(INodeMap & nodeMap, bool is_primary)
 /*
 int GrabNextImageByTrigger(INodeMap & nodeMap, CameraPtr pCam, bool is_primary)
 {
-	int result = 0;
+int result = 0;
 
-	try
-	{
-		// 
-		// Use trigger to capture image
-		//
-		// *** NOTES ***
-		// The software trigger only feigns being executed by the Enter key;
-		// what might not be immediately apparent is that there is not a
-		// continuous stream of images being captured; in other examples that 
-		// acquire images, the camera captures a continuous stream of images. 
-		// When an image is retrieved, it is plucked from the stream.
-		//
-		if (is_primary)
-		{
-			// Get user input
-			cout << "Press the Enter key to initiate software trigger." << endl;
-			getchar();
+try
+{
+//
+// Use trigger to capture image
+//
+// *** NOTES ***
+// The software trigger only feigns being executed by the Enter key;
+// what might not be immediately apparent is that there is not a
+// continuous stream of images being captured; in other examples that
+// acquire images, the camera captures a continuous stream of images.
+// When an image is retrieved, it is plucked from the stream.
+//
+if (is_primary)
+{
+// Get user input
+cout << "Press the Enter key to initiate software trigger." << endl;
+getchar();
 
-			// Execute software trigger
-			CCommandPtr ptrSoftwareTriggerCommand = nodeMap.GetNode("TriggerSoftware");
-			if (!IsAvailable(ptrSoftwareTriggerCommand) || !IsWritable(ptrSoftwareTriggerCommand))
-			{
-				cout << "Unable to execute trigger. Aborting..." << endl;
-				return -1;
-			}
+// Execute software trigger
+CCommandPtr ptrSoftwareTriggerCommand = nodeMap.GetNode("TriggerSoftware");
+if (!IsAvailable(ptrSoftwareTriggerCommand) || !IsWritable(ptrSoftwareTriggerCommand))
+{
+cout << "Unable to execute trigger. Aborting..." << endl;
+return -1;
+}
 
-			ptrSoftwareTriggerCommand->Execute();
+ptrSoftwareTriggerCommand->Execute();
 
-			// TODO: Blackfly and Flea3 GEV cameras need 2 second delay after software trigger 
-		}
-		else
-		{
-			// Execute hardware trigger
-			cout << "Use the hardware to trigger image acquisition." << endl;
-		}
-	}
-	catch (Spinnaker::Exception &e)
-	{
-		cout << "Error: " << e.what() << endl;
-		result = -1;
-	}
+// TODO: Blackfly and Flea3 GEV cameras need 2 second delay after software trigger
+}
+else
+{
+// Execute hardware trigger
+cout << "Use the hardware to trigger image acquisition." << endl;
+}
+}
+catch (Spinnaker::Exception &e)
+{
+cout << "Error: " << e.what() << endl;
+result = -1;
+}
 
-	return result;
+return result;
 }
 */
 
@@ -722,12 +726,12 @@ int ConfigureCustomImageSettings(INodeMap & nodeMap)
 		CIntegerPtr ptrOffsetX = nodeMap.GetNode("OffsetX");
 		if (IsAvailable(ptrOffsetX) && IsWritable(ptrOffsetX))
 		{
-			ptrOffsetX->SetValue(ptrOffsetX->GetMin());
-			cout << "Offset X set to " << ptrOffsetX->GetMin() << "..." << endl;
+		ptrOffsetX->SetValue(ptrOffsetX->GetMin());
+		cout << "Offset X set to " << ptrOffsetX->GetMin() << "..." << endl;
 		}
 		else
 		{
-			cout << "Offset X not available..." << endl;
+		cout << "Offset X not available..." << endl;
 		}
 		*/
 
@@ -746,12 +750,12 @@ int ConfigureCustomImageSettings(INodeMap & nodeMap)
 		CIntegerPtr ptrOffsetY = nodeMap.GetNode("OffsetY");
 		if (IsAvailable(ptrOffsetY) && IsWritable(ptrOffsetY))
 		{
-			ptrOffsetY->SetValue(ptrOffsetY->GetMin());
-			cout << "Offset Y set to " << ptrOffsetY->GetValue() << "..." << endl;
+		ptrOffsetY->SetValue(ptrOffsetY->GetMin());
+		cout << "Offset Y set to " << ptrOffsetY->GetValue() << "..." << endl;
 		}
 		else
 		{
-			cout << "Offset Y not available..." << endl;
+		cout << "Offset Y not available..." << endl;
 		}
 		*/
 
@@ -766,7 +770,7 @@ int ConfigureCustomImageSettings(INodeMap & nodeMap)
 		// there is no reason to check against the increment.
 		//
 
-		
+
 		CIntegerPtr ptrWidth = nodeMap.GetNode("Width");
 		if (IsAvailable(ptrWidth) && IsWritable(ptrWidth))
 		{
@@ -780,7 +784,7 @@ int ConfigureCustomImageSettings(INodeMap & nodeMap)
 		{
 			cout << "Width not available..." << endl;
 		}
-		
+
 
 		//==========================================================================
 		// Set maximum height
@@ -790,7 +794,7 @@ int ConfigureCustomImageSettings(INodeMap & nodeMap)
 		// maximum should always be a multiple of its increment.
 		//
 
-		
+
 		CIntegerPtr ptrHeight = nodeMap.GetNode("Height");
 		if (IsAvailable(ptrHeight) && IsWritable(ptrHeight))
 		{
@@ -804,7 +808,7 @@ int ConfigureCustomImageSettings(INodeMap & nodeMap)
 		{
 			cout << "Height not available..." << endl << endl;
 		}
-		
+
 	}
 	catch (Spinnaker::Exception &e)
 	{
@@ -864,7 +868,7 @@ int ConfigureVideoAndOpen(SpinVideo & video, INodeMap & nodeMap, INodeMap & node
 		// name of the file. This is because the SpinVideo object takes care
 		// of the file extension automatically.
 		//
-		string videoFilename = "F:\\temp\\test_sync\\";
+		string videoFilename = outputFolder + "\\";
 
 		switch (chosenVideoType)
 		{
@@ -1141,7 +1145,7 @@ struct SaveVectorToVideoParam {
 	unsigned int id; // video id if take several videos
 
 	SaveVectorToVideoParam(CameraPtr _pCam, vector<ImagePtr> _images, unsigned int _id) :
-		pCam(_pCam), images(_images), id(_id){}
+		pCam(_pCam), images(_images), id(_id) {}
 };
 
 
@@ -1151,7 +1155,7 @@ DWORD WINAPI SaveVectorToVideoThread(LPVOID lpParam)
 {
 	SaveVectorToVideoParam param = *((SaveVectorToVideoParam*)lpParam);
 	CameraPtr pCam = param.pCam;
-	
+
 	try
 	{
 		INodeMap & nodeMapTLDevice = pCam->GetTLDeviceNodeMap();
@@ -1211,40 +1215,40 @@ DWORD WINAPI SaveImageThread(LPVOID lpParam)
 #if defined (_WIN32)
 DWORD WINAPI AcquireImages(LPVOID lpParam)
 {
-    CameraPtr pCam = *((CameraPtr*)lpParam);
+	CameraPtr pCam = *((CameraPtr*)lpParam);
 #else
 void* AcquireImages(void* arg)
 {
-    CameraPtr pCam = *((CameraPtr*)arg);
+	CameraPtr pCam = *((CameraPtr*)arg);
 #endif
 	int err = 0;
 	int result = 0;
 
-    try
-    {
+	try
+	{
 		// ===========================================================================================================
-        // Retrieve TL device nodemap
-        INodeMap & nodeMapTLDevice = pCam->GetTLDeviceNodeMap();
+		// Retrieve TL device nodemap
+		INodeMap & nodeMapTLDevice = pCam->GetTLDeviceNodeMap();
 
-        // Retrieve device serial number for filename
-        CStringPtr ptrStringSerial = pCam->GetTLDeviceNodeMap().GetNode("DeviceSerialNumber");
+		// Retrieve device serial number for filename
+		CStringPtr ptrStringSerial = pCam->GetTLDeviceNodeMap().GetNode("DeviceSerialNumber");
 
-        std::string serialNumber = "";
-        if (IsAvailable(ptrStringSerial) && IsReadable(ptrStringSerial))
-        {
-            serialNumber = ptrStringSerial->GetValue();
-        }
+		std::string serialNumber = "";
+		if (IsAvailable(ptrStringSerial) && IsReadable(ptrStringSerial))
+		{
+			serialNumber = ptrStringSerial->GetValue();
+		}
 
-        cout << endl << "[" << serialNumber << "] " << "*** IMAGE ACQUISITION THREAD STARTING" << " ***" << endl << endl;
+		cout << endl << "[" << serialNumber << "] " << "*** IMAGE ACQUISITION THREAD STARTING" << " ***" << endl << endl;
 
 		bool is_primary = (serialNumber == serialNumberPrimary);
 
-        // Print device information
-        PrintDeviceInfo(nodeMapTLDevice, serialNumber);
+		// Print device information
+		PrintDeviceInfo(nodeMapTLDevice, serialNumber);
 
 		// ===========================================================================================================
 		// Initialize camera
-        pCam->Init();
+		pCam->Init();
 
 		// Configure custom image settings
 		err = ConfigureCustomImageSettings(pCam->GetNodeMap());
@@ -1266,48 +1270,48 @@ void* AcquireImages(void* arg)
 		if (err < 0) return err;
 
 #ifdef _DEBUG
-        cout << endl << endl << "*** DEBUG ***" << endl << endl;
+		cout << endl << endl << "*** DEBUG ***" << endl << endl;
 
-        // If using a GEV camera and debugging, should disable heartbeat first to prevent further issues
-        if (DisableHeartbeat(pCam, pCam->GetNodeMap(), pCam->GetTLDeviceNodeMap()) != 0)
-        {
+		// If using a GEV camera and debugging, should disable heartbeat first to prevent further issues
+		if (DisableHeartbeat(pCam, pCam->GetNodeMap(), pCam->GetTLDeviceNodeMap()) != 0)
+		{
 #if defined (_WIN32)
-            return 0;
+			return 0;
 #else
-            return (void*)0;
+			return (void*)0;
 #endif
-        }
+		}
 
-        cout << endl << endl << "*** END OF DEBUG ***" << endl << endl;
+		cout << endl << endl << "*** END OF DEBUG ***" << endl << endl;
 #endif
 
-        // Set acquisition mode to continuous
-        CEnumerationPtr ptrAcquisitionMode = pCam->GetNodeMap().GetNode("AcquisitionMode");
-        if (!IsAvailable(ptrAcquisitionMode) || !IsWritable(ptrAcquisitionMode))
-        {
-            cout << "Unable to set acquisition mode to continuous (node retrieval; camera " << serialNumber << "). Aborting..." << endl << endl;
+		// Set acquisition mode to continuous
+		CEnumerationPtr ptrAcquisitionMode = pCam->GetNodeMap().GetNode("AcquisitionMode");
+		if (!IsAvailable(ptrAcquisitionMode) || !IsWritable(ptrAcquisitionMode))
+		{
+			cout << "Unable to set acquisition mode to continuous (node retrieval; camera " << serialNumber << "). Aborting..." << endl << endl;
 #if defined (_WIN32)
-            return 0;
+			return 0;
 #else
-            return (void*)0;
+			return (void*)0;
 #endif
-        }
+		}
 
-        CEnumEntryPtr ptrAcquisitionModeContinuous = ptrAcquisitionMode->GetEntryByName("Continuous");
-        if (!IsAvailable(ptrAcquisitionModeContinuous) || !IsReadable(ptrAcquisitionModeContinuous))
-        {
-            cout << "Unable to set acquisition mode to continuous (entry 'continuous' retrieval " << serialNumber << "). Aborting..." << endl << endl;
+		CEnumEntryPtr ptrAcquisitionModeContinuous = ptrAcquisitionMode->GetEntryByName("Continuous");
+		if (!IsAvailable(ptrAcquisitionModeContinuous) || !IsReadable(ptrAcquisitionModeContinuous))
+		{
+			cout << "Unable to set acquisition mode to continuous (entry 'continuous' retrieval " << serialNumber << "). Aborting..." << endl << endl;
 #if defined (_WIN32)
-            return 0;
+			return 0;
 #else
-            return (void*)0;
+			return (void*)0;
 #endif
-        }
+		}
 
-        int64_t acquisitionModeContinuous = ptrAcquisitionModeContinuous->GetValue();
-        ptrAcquisitionMode->SetIntValue(acquisitionModeContinuous);
+		int64_t acquisitionModeContinuous = ptrAcquisitionModeContinuous->GetValue();
+		ptrAcquisitionMode->SetIntValue(acquisitionModeContinuous);
 
-        cout << "[" << serialNumber << "] " << "Acquisition mode set to continuous..." << endl;
+		cout << "[" << serialNumber << "] " << "Acquisition mode set to continuous..." << endl;
 
 
 		//=================================================================================
@@ -1315,12 +1319,16 @@ void* AcquireImages(void* arg)
 		SpinVideo video;
 		result = ConfigureVideoAndOpen(video, pCam->GetNodeMap(), nodeMapTLDevice);
 
+		// Open log file
+		ofstream logFile;
+		logFile.open(outputFolder + "Log" + serialNumber + ".txt");
+
 
 		//=================================================================================
 		// Begin acquiring images
 		pCam->BeginAcquisition();
 
-        cout << "[" << serialNumber << "] " << "Started acquiring images..." << endl;
+		cout << "[" << serialNumber << "] " << "Started acquiring images..." << endl;
 
 		//==================================================================================
 		// Trigger the primary camera
@@ -1346,203 +1354,208 @@ void* AcquireImages(void* arg)
 
 			cout << "Trigger mode disabled... And Start Capture" << endl;
 		}
-		
+
 
 		//==================================================================================
 		// Retrieve, convert, and save images for each camera
-        
-        cout << endl;
-		
-        for (unsigned int imageCnt = 0; imageCnt < k_numImages; imageCnt++)
-        {
-            try
-            {
+
+		cout << endl;
+
+		for (unsigned int imageCnt = 0; imageCnt < k_numImages; imageCnt++)
+		{
+			try
+			{
 				// Retrieve next received image and ensure image completion
-                ImagePtr pResultImage = pCam->GetNextImage();
+				ImagePtr pResultImage = pCam->GetNextImage();
 
-                if (pResultImage->IsIncomplete())
-                {
-                    cout << "[" << serialNumber << "] " << "Image incomplete with image status " << pResultImage->GetImageStatus() << "..." << endl << endl;
-                }
-                else
-                {
-                    ImagePtr convertedImage = pResultImage->Convert(selectPixelFormat, HQ_LINEAR);
+				if (pResultImage->IsIncomplete())
+				{
+					cout << "[" << serialNumber << "] " << "Image incomplete with image status " << pResultImage->GetImageStatus() << "..." << endl << endl;
+				}
+				else
+				{
+					ImagePtr convertedImage = pResultImage->Convert(selectPixelFormat, HQ_LINEAR);
 
-					
+
 					//=============================
 					// Save to an image file
 					/*
-                    // Create a unique filename
+					// Create a unique filename
 					string filename = "imgs/";
 
-                    if (serialNumber != "") {
-                        filename += serialNumber.c_str();
-                    }
+					if (serialNumber != "") {
+					filename += serialNumber.c_str();
+					}
 
 					char buffer[256]; sprintf(buffer, "%06d", imageCnt);
 					string img_id(buffer);
 					filename +=  "/img_" +  img_id +  ".jpg";
 					*/
-                    // Save image
-                    // convertedImage->Save(filename.str().c_str());
+					// Save image
+					// convertedImage->Save(filename.str().c_str());
 
 					// Append image to video
 					video.Append(convertedImage);
 
-					result = DisplayChunkData(pResultImage);
+					result = DisplayChunkData(pResultImage, logFile, imageCnt);
 
 					// Print image information
-					if((imageCnt+1) % 10 == 0)
+					if ((imageCnt + 1) % k_numPrintInfo == 0)
 						cout << "[" << serialNumber << "] " << "Grabbed image " << imageCnt << ", width = " << pResultImage->GetWidth() << ", height = " << pResultImage->GetHeight() << endl; //". Image saved at " << filename.str() << endl;
-					
-					
+
+
 				}
 
 
-            }
-            catch (Spinnaker::Exception &e)
-            {
+			}
+			catch (Spinnaker::Exception &e)
+			{
 				// End acquisition
 				pCam->EndAcquisition();
 				// Deinitialize camera
 				pCam->DeInit();
 
-                cout << "[" << serialNumber << "] " << "Error: " << e.what() << endl;
-            }
-        }
+				video.Close();
+				logFile.close();
+
+				cout << "[" << serialNumber << "] " << "Error: " << e.what() << endl;
+			}
+		}
 
 		// End acquisition
 		pCam->EndAcquisition();
+		
+		err = DisableChunkData(pCam->GetNodeMap());
+		if (err < 0) return err;
+
 		// Deinitialize camera
 		pCam->DeInit();
 
-		err = DisableChunkData(pCam->GetNodeMap());
-		if (err < 0) return err;
-		
 		video.Close();
+		logFile.close();
 
 
 
 #if defined (_WIN32)
-        return 1;
+		return 1;
 #else
-        return (void*)1;
+		return (void*)1;
 #endif
-    }
-    catch (Spinnaker::Exception &e)
-    {
-        cout << "Error: " << e.what() << endl;
+	}
+	catch (Spinnaker::Exception &e)
+	{
+		cout << "Error: " << e.what() << endl;
 #if defined (_WIN32)
-        return 0;
+		return 0;
 #else
-        return (void*)0;
+		return (void*)0;
 #endif
-    }
+	}
 }
 
 
 // This function acts as the body of the example
 int RunMultipleCameras(CameraList camList)
 {
-    int result = 0;
-    unsigned int camListSize = 0;
+	int result = 0;
+	unsigned int camListSize = 0;
 
-    try
-    {
-        // Retrieve camera list size
-        camListSize = camList.GetSize();
+	try
+	{
+		// Retrieve camera list size
+		camListSize = camList.GetSize();
 
-        // Create an array of CameraPtrs. This array maintenances smart pointer's reference
-        // count when CameraPtr is passed into grab thread as void pointer
+		// Create an array of CameraPtrs. This array maintenances smart pointer's reference
+		// count when CameraPtr is passed into grab thread as void pointer
 
-        // Create an array of handles
-        CameraPtr* pCamList = new CameraPtr[camListSize];
+		// Create an array of handles
+		CameraPtr* pCamList = new CameraPtr[camListSize];
 #if defined(_WIN32)
-        HANDLE* grabThreads = new HANDLE[camListSize];
+		HANDLE* grabThreads = new HANDLE[camListSize];
 #else
-        pthread_t* grabThreads = new pthread_t[camListSize];
+		pthread_t* grabThreads = new pthread_t[camListSize];
 #endif
 
-        for (unsigned int i = 0; i < camListSize; i++)
-        {
-            // Select camera
-            pCamList[i] = camList.GetByIndex(i);
-            // Start grab thread
+		for (unsigned int i = 0; i < camListSize; i++)
+		{
+			// Select camera
+			pCamList[i] = camList.GetByIndex(i);
+			// Start grab thread
 #if defined(_WIN32)
-            grabThreads[i] = CreateThread(NULL, 0, AcquireImages, &pCamList[i], 0, NULL);
-            assert(grabThreads[i] != NULL);
+			grabThreads[i] = CreateThread(NULL, 0, AcquireImages, &pCamList[i], 0, NULL);
+			assert(grabThreads[i] != NULL);
 #else
-            int err = pthread_create(&(grabThreads[i]), NULL, &AcquireImages, &pCamList[i]);
-            assert(err == 0);
+			int err = pthread_create(&(grabThreads[i]), NULL, &AcquireImages, &pCamList[i]);
+			assert(err == 0);
 #endif
-        }
+		}
 
 
 #if defined(_WIN32)
-        // Wait for all threads to finish
-        WaitForMultipleObjects(camListSize,		// number of threads to wait for 
-            grabThreads,				// handles for threads to wait for
-            TRUE,					// wait for all of the threads
-            INFINITE				// wait forever
-        );
+		// Wait for all threads to finish
+		WaitForMultipleObjects(camListSize,		// number of threads to wait for 
+			grabThreads,				// handles for threads to wait for
+			TRUE,					// wait for all of the threads
+			INFINITE				// wait forever
+		);
 
-        // Check thread return code for each camera
-        for (unsigned int i = 0; i < camListSize; i++)
-        {
-            DWORD exitcode;
+		// Check thread return code for each camera
+		for (unsigned int i = 0; i < camListSize; i++)
+		{
+			DWORD exitcode;
 
-            BOOL rc = GetExitCodeThread(grabThreads[i], &exitcode);
-            if (!rc)
-            {
-                cout << "Handle error from GetExitCodeThread() returned for camera at index " << i << endl;
-            }
-            else if (!exitcode)
-            {
-                cout << "Grab thread for camera at index " << i << " exited with errors."
-                    "Please check onscreen print outs for error details" << endl;
-            }
-        }
+			BOOL rc = GetExitCodeThread(grabThreads[i], &exitcode);
+			if (!rc)
+			{
+				cout << "Handle error from GetExitCodeThread() returned for camera at index " << i << endl;
+			}
+			else if (!exitcode)
+			{
+				cout << "Grab thread for camera at index " << i << " exited with errors."
+					"Please check onscreen print outs for error details" << endl;
+			}
+		}
 
 #else
-        for (unsigned int i = 0; i < camListSize; i++)
-        {
-            // Wait for all threads to finish
-            void* exitcode;
-            int rc = pthread_join(grabThreads[i], &exitcode);
-            if (rc != 0)
-            {
-                cout << "Handle error from pthread_join returned for camera at index " << i << endl;
-            }
-            else if ((int)(intptr_t)exitcode == 0)// check thread return code for each camera
-            {
-                cout << "Grab thread for camera at index " << i << " exited with errors."
-                    "Please check onscreen print outs for error details" << endl;
-            }
-        }
+		for (unsigned int i = 0; i < camListSize; i++)
+		{
+			// Wait for all threads to finish
+			void* exitcode;
+			int rc = pthread_join(grabThreads[i], &exitcode);
+			if (rc != 0)
+			{
+				cout << "Handle error from pthread_join returned for camera at index " << i << endl;
+			}
+			else if ((int)(intptr_t)exitcode == 0)// check thread return code for each camera
+			{
+				cout << "Grab thread for camera at index " << i << " exited with errors."
+					"Please check onscreen print outs for error details" << endl;
+			}
+		}
 #endif
 
-        // Clear CameraPtr array and close all handles
-        for (unsigned int i = 0; i < camListSize; i++)
-        {
-            pCamList[i] = 0;
+		// Clear CameraPtr array and close all handles
+		for (unsigned int i = 0; i < camListSize; i++)
+		{
+			pCamList[i] = 0;
 #if defined(_WIN32)            
-            CloseHandle(grabThreads[i]);
+			CloseHandle(grabThreads[i]);
 #endif
-        }
+		}
 
-        // Delete array pointer
-        delete[] pCamList;
+		// Delete array pointer
+		delete[] pCamList;
 
-        // Delete array pointer
-        delete[] grabThreads;
-    }
-    catch (Spinnaker::Exception &e)
-    {
-        cout << "Error: " << e.what() << endl;
-        result = -1;
-    }
+		// Delete array pointer
+		delete[] grabThreads;
+	}
+	catch (Spinnaker::Exception &e)
+	{
+		cout << "Error: " << e.what() << endl;
+		result = -1;
+	}
 
-    return result;
+	return result;
 }
 
 
@@ -1550,77 +1563,77 @@ int RunMultipleCameras(CameraList camList)
 // comments on preparing and cleaning up the system.
 int main(int /*argc*/, char** /*argv*/)
 {
-    // Since this application saves images in the current folder
-    // we must ensure that we have permission to write to this folder.
-    // If we do not have permission, fail right away.
-    FILE *tempFile = fopen("test.txt", "w+");
-    if (tempFile == NULL)
-    {
-        cout << "Failed to create file in current folder.  Please check permissions." << endl;
-        cout << "Press Enter to exit..." << endl;
-        getchar();
-        return -1;
-    }
+	// Since this application saves images in the current folder
+	// we must ensure that we have permission to write to this folder.
+	// If we do not have permission, fail right away.
+	FILE *tempFile = fopen("test.txt", "w+");
+	if (tempFile == NULL)
+	{
+		cout << "Failed to create file in current folder.  Please check permissions." << endl;
+		cout << "Press Enter to exit..." << endl;
+		getchar();
+		return -1;
+	}
 
-    fclose(tempFile);
-    remove("test.txt");
+	fclose(tempFile);
+	remove("test.txt");
 
-    int result = 0;
+	int result = 0;
 
-    // Print application build information
-    cout << "Application build date: " << __DATE__ << " " << __TIME__ << endl << endl;
+	// Print application build information
+	cout << "Application build date: " << __DATE__ << " " << __TIME__ << endl << endl;
 
-    // Retrieve singleton reference to system object
-    SystemPtr system = System::GetInstance();
+	// Retrieve singleton reference to system object
+	SystemPtr system = System::GetInstance();
 
-    // Print out current library version
-    const LibraryVersion spinnakerLibraryVersion = system->GetLibraryVersion();
-    cout << "Spinnaker library version: "
-        << spinnakerLibraryVersion.major << "."
-        << spinnakerLibraryVersion.minor << "."
-        << spinnakerLibraryVersion.type << "."
-        << spinnakerLibraryVersion.build << endl << endl;
+	// Print out current library version
+	const LibraryVersion spinnakerLibraryVersion = system->GetLibraryVersion();
+	cout << "Spinnaker library version: "
+		<< spinnakerLibraryVersion.major << "."
+		<< spinnakerLibraryVersion.minor << "."
+		<< spinnakerLibraryVersion.type << "."
+		<< spinnakerLibraryVersion.build << endl << endl;
 
-    // Retrieve list of cameras from the system
-    CameraList camList = system->GetCameras();
+	// Retrieve list of cameras from the system
+	CameraList camList = system->GetCameras();
 
-    unsigned int numCameras = camList.GetSize();
+	unsigned int numCameras = camList.GetSize();
 
-    cout << "Number of cameras detected: " << numCameras << endl << endl;
+	cout << "Number of cameras detected: " << numCameras << endl << endl;
 
-    // Finish if there are no cameras
-    if (numCameras == 0)
-    {
-        // Clear camera list before releasing system
-        camList.Clear();
+	// Finish if there are no cameras
+	if (numCameras == 0)
+	{
+		// Clear camera list before releasing system
+		camList.Clear();
 
-        // Release system
-        system->ReleaseInstance();
+		// Release system
+		system->ReleaseInstance();
 
-        cout << "Not enough cameras!" << endl;
-        cout << "Done! Press Enter to exit..." << endl;
-        getchar();
+		cout << "Not enough cameras!" << endl;
+		cout << "Done! Press Enter to exit..." << endl;
+		getchar();
 
-        return -1;
-    }
+		return -1;
+	}
 
-    // Run example on all cameras
-    cout << endl << "Running example for all cameras..." << endl;
+	// Run example on all cameras
+	cout << endl << "Running example for all cameras..." << endl;
 
-    result = RunMultipleCameras(camList);
+	result = RunMultipleCameras(camList);
 
-    cout << "Example complete..." << endl << endl;
+	cout << "Example complete..." << endl << endl;
 
-    // Clear camera list before releasing system
-    camList.Clear();
+	// Clear camera list before releasing system
+	camList.Clear();
 
-    // Release system
-    system->ReleaseInstance();
+	// Release system
+	system->ReleaseInstance();
 
-    cout << endl << "Done! Press Enter to exit..." << endl;
-    getchar();
+	cout << endl << "Done! Press Enter to exit..." << endl;
+	getchar();
 
-    return result;
+	return result;
 }
 
 
