@@ -61,23 +61,58 @@ enum chunkDataType
 };
 
 
+enum bufferType
+{
+	NewestFirst,
+	NewestFirstOverwrite,
+	NewestOnly,
+	OldestFirst,
+	OldestFirstOverwrite,
+};
+
+
 // ===================================================================================
 // ==================================== SELECT =======================================
 // ===================================================================================
 const chunkDataType chosenChunkData = IMAGE;
-const PixelFormatEnums selectPixelFormat = PixelFormat_BGR8; // PixelFormat_Mono8;
+const PixelFormatEnums savePixelFormat = PixelFormat_BGR8; // PixelFormat_Mono8;
+const unsigned int numBuffers = 10; // Total number of buffers
+const bufferType chosenBufferType = OldestFirstOverwrite;
+
 const string serialNumberPrimary = "18565847"; // "18566303";
-const gcstring selectPixelFormatName = "BGR8";
-const int selectFrameRate = 28;
+const gcstring grabPixelFormatName = "BayerBG8"; // BayerBG8
+
+const int selectFrameRate = 20;
 const videoType chosenVideoType = MJPG; // UNCOMPRESSED;
-const unsigned int k_numImages = 10;
+const unsigned int k_numImages = 10000;
 const unsigned int k_numPrintInfo = 20;
+
 // const unsigned int k_savePerNumImages = 100;
 // const unsigned int k_threadPerCameraForSaving = 3;
-const unsigned int imageHeight = 512; //???
-const unsigned int imageWidth = 640;
+const unsigned int imageHeight = 1028; //???
+const unsigned int imageWidth = 1280;
 
-const string outputFolder = "F:\\temp\\test_sync\\";
+const int k_numCameras = 6;
+const string serialNumbers[k_numCameras] = {
+	"18565847",
+	"18565848",
+	"18565849",
+	"18565850",
+	"18565851",
+	"18566303"
+};
+
+// const string outputFolder = "F:\\temp\\test_sync\\";
+const string outputFolders[k_numCameras] = {
+	"D:\\temp\\test_sync\\",
+	"G:\\temp\\test_sync\\",
+	"H:\\temp\\test_sync\\",
+	"I:\\temp\\test_sync\\",
+	"J:\\temp\\test_sync\\",
+	"K:\\temp\\test_sync\\"
+};
+
+const string subfolderName = "022219_0005_test10000frames";
 // ===================================================================================
 
 
@@ -125,6 +160,109 @@ int PrintDeviceInfo(INodeMap & nodeMap, std::string camSerial)
 	cout << endl;
 
 	return result;
+}
+
+int ConfigureBuffer(INodeMap & sNodeMap)
+{
+	// Retrieve Stream Parameters device nodemap 
+	// Spinnaker::GenApi::INodeMap & sNodeMap = pCam->GetTLStreamNodeMap();
+
+	try
+	{
+		// Retrieve Buffer Handling Mode Information
+		CEnumerationPtr ptrHandlingMode = sNodeMap.GetNode("StreamBufferHandlingMode");
+		if (!IsAvailable(ptrHandlingMode) || !IsWritable(ptrHandlingMode))
+		{
+			cout << "Unable to set Buffer Handling mode (node retrieval). Aborting..." << endl << endl;
+			return -1;
+		}
+		CEnumEntryPtr ptrHandlingModeEntry = ptrHandlingMode->GetCurrentEntry();
+		if (!IsAvailable(ptrHandlingModeEntry) || !IsReadable(ptrHandlingModeEntry))
+		{
+			cout << "Unable to set Buffer Handling mode (Entry retrieval). Aborting..." << endl << endl;
+			return -1;
+		}
+
+		// Set stream buffer Count Mode to manual
+		CEnumerationPtr ptrStreamBufferCountMode = sNodeMap.GetNode("StreamBufferCountMode");
+		if (!IsAvailable(ptrStreamBufferCountMode) || !IsWritable(ptrStreamBufferCountMode))
+		{
+			cout << "Unable to set Buffer Count Mode (node retrieval). Aborting..." << endl << endl;
+			return -1;
+		}
+
+		CEnumEntryPtr ptrStreamBufferCountModeManual = ptrStreamBufferCountMode->GetEntryByName("Manual"); //  Original: Auto
+		if (!IsAvailable(ptrStreamBufferCountModeManual) || !IsReadable(ptrStreamBufferCountModeManual))
+		{
+			cout << "Unable to set Buffer Count Mode entry (Entry retrieval). Aborting..." << endl << endl;
+			return -1;
+		}
+
+		ptrStreamBufferCountMode->SetIntValue(ptrStreamBufferCountModeManual->GetValue());
+
+		cout << "Stream Buffer Count Mode set to manual..." << endl;
+
+		// Retrieve and modify Stream Buffer Count
+		CIntegerPtr ptrBufferCount = sNodeMap.GetNode("StreamBufferCountManual");
+		if (!IsAvailable(ptrBufferCount) || !IsWritable(ptrBufferCount))
+		{
+			cout << "Unable to set Buffer Count (Integer node retrieval). Aborting..." << endl << endl;
+			return -1;
+		}
+
+		// Display Buffer Info
+		cout << endl << "Default Buffer Handling Mode: " << ptrHandlingModeEntry->GetDisplayName() << endl;
+		cout << "Default Buffer Count: " << ptrBufferCount->GetValue() << endl;
+		cout << "Maximum Buffer Count: " << ptrBufferCount->GetMax() << endl;
+
+		ptrBufferCount->SetValue(numBuffers);
+
+		cout << "Buffer count now set to: " << ptrBufferCount->GetValue() << endl;
+
+		switch (chosenBufferType)
+		{
+		case NewestFirst:
+			ptrHandlingModeEntry = ptrHandlingMode->GetEntryByName("NewestFirst");
+			ptrHandlingMode->SetIntValue(ptrHandlingModeEntry->GetValue());
+			cout << endl << endl << "Buffer Handling Mode has been set to " << ptrHandlingModeEntry->GetDisplayName() << endl;
+			break;
+
+		case NewestFirstOverwrite:
+			ptrHandlingModeEntry = ptrHandlingMode->GetEntryByName("NewestFirstOverwrite");
+			ptrHandlingMode->SetIntValue(ptrHandlingModeEntry->GetValue());
+			cout << endl << endl << "Buffer Handling Mode has been set to " << ptrHandlingModeEntry->GetDisplayName() << endl;
+			break;
+		
+		case NewestOnly:
+			ptrHandlingModeEntry = ptrHandlingMode->GetEntryByName("NewestOnly"); // Default setting
+			ptrHandlingMode->SetIntValue(ptrHandlingModeEntry->GetValue());
+			cout << endl << endl << "Buffer Handling Mode has been set to " << ptrHandlingModeEntry->GetDisplayName() << endl;
+			break;
+
+		case OldestFirst:
+			ptrHandlingModeEntry = ptrHandlingMode->GetEntryByName("OldestFirst");
+			ptrHandlingMode->SetIntValue(ptrHandlingModeEntry->GetValue());
+			cout << endl << endl << "Buffer Handling Mode has been set to " << ptrHandlingModeEntry->GetDisplayName() << endl;
+			break;
+
+		case OldestFirstOverwrite:
+			ptrHandlingModeEntry = ptrHandlingMode->GetEntryByName("OldestFirstOverwrite");
+			ptrHandlingMode->SetIntValue(ptrHandlingModeEntry->GetValue());
+			cout << endl << endl << "Buffer Handling Mode has been set to " << ptrHandlingModeEntry->GetDisplayName() << endl;
+			break;
+
+		default:
+			break;
+		}
+
+	}
+	catch (Spinnaker::Exception &e)
+	{
+		cout << "Error: " << e.what() << endl;
+		return -1;
+	}
+
+	return 0;
 }
 
 
@@ -278,7 +416,7 @@ int DisplayChunkData(ImagePtr pImage, ofstream& logFile, int frame_id)
 
 		// Retrieve timestamp
 		uint64_t timestamp = chunkData.GetTimestamp();
-		logFile << "\tTimestamp: " << timestamp << "\n";
+		logFile << "\tTimestamp: " << timestamp / long int(1e9) << "." << timestamp % long int(1e9) << "\n";
 
 		logFile << endl;
 	}
@@ -693,7 +831,7 @@ int ConfigureCustomImageSettings(INodeMap & nodeMap)
 		if (IsAvailable(ptrPixelFormat) && IsWritable(ptrPixelFormat))
 		{
 			// Retrieve the desired entry node from the enumeration node
-			CEnumEntryPtr ptrPixelFormatSelect = ptrPixelFormat->GetEntryByName(selectPixelFormatName); // Mono8
+			CEnumEntryPtr ptrPixelFormatSelect = ptrPixelFormat->GetEntryByName(grabPixelFormatName); // Mono8
 			if (IsAvailable(ptrPixelFormatSelect) && IsReadable(ptrPixelFormatSelect))
 			{
 				// Retrieve the integer value from the entry node
@@ -821,7 +959,7 @@ int ConfigureCustomImageSettings(INodeMap & nodeMap)
 
 
 // Configure Video Settings
-int ConfigureVideoAndOpen(SpinVideo & video, INodeMap & nodeMap, INodeMap & nodeMapTLDevice)
+int ConfigureVideoAndOpen(SpinVideo & video, INodeMap & nodeMap, INodeMap & nodeMapTLDevice, string outputFolder)
 {
 	int result = 0;
 
@@ -1259,6 +1397,10 @@ void* AcquireImages(void* arg)
 		// pCam->TimestampReset();
 		if (err < 0) return err;
 
+		// Configure Buffer
+		err = ConfigureBuffer(pCam->GetTLStreamNodeMap());
+		if (err < 0) return err;
+
 		// Change Camera settings
 		pCam->AcquisitionFrameRateEnable = true;
 		pCam->AcquisitionFrameRate = selectFrameRate;
@@ -1285,6 +1427,7 @@ void* AcquireImages(void* arg)
 		cout << endl << endl << "*** END OF DEBUG ***" << endl << endl;
 #endif
 
+		// ===========================================================================================================
 		// Set acquisition mode to continuous
 		CEnumerationPtr ptrAcquisitionMode = pCam->GetNodeMap().GetNode("AcquisitionMode");
 		if (!IsAvailable(ptrAcquisitionMode) || !IsWritable(ptrAcquisitionMode))
@@ -1313,12 +1456,23 @@ void* AcquireImages(void* arg)
 
 		cout << "[" << serialNumber << "] " << "Acquisition mode set to continuous..." << endl;
 
+		//
+		int camId = 0;
+		for (int idx = 0; idx < k_numCameras; ++idx) {
+			if (serialNumber == serialNumbers[idx]) camId = idx;
+		}
+		string outputFolder = outputFolders[camId] + "\\" + subfolderName + "\\";
+
+		if (CreateDirectoryA(outputFolder.c_str(), NULL) ||
+			ERROR_ALREADY_EXISTS == GetLastError())
+			cout << "[" << serialNumber << "] " << "Output at path: " << outputFolder << endl;
 
 		//=================================================================================
 		// Init and open Video
 		SpinVideo video;
-		result = ConfigureVideoAndOpen(video, pCam->GetNodeMap(), nodeMapTLDevice);
+		result = ConfigureVideoAndOpen(video, pCam->GetNodeMap(), nodeMapTLDevice, outputFolder);
 
+		//=================================================================================
 		// Open log file
 		ofstream logFile;
 		logFile.open(outputFolder + "Log" + serialNumber + ".txt");
@@ -1374,8 +1528,8 @@ void* AcquireImages(void* arg)
 				}
 				else
 				{
-					ImagePtr convertedImage = pResultImage->Convert(selectPixelFormat, HQ_LINEAR);
-
+					// ImagePtr convertedImage = pResultImage->Convert(savePixelFormat, HQ_LINEAR);
+					ImagePtr convertedImage = pResultImage;
 
 					//=============================
 					// Save to an image file
@@ -1602,7 +1756,7 @@ int main(int /*argc*/, char** /*argv*/)
 	cout << "Number of cameras detected: " << numCameras << endl << endl;
 
 	// Finish if there are no cameras
-	if (numCameras == 0)
+	if (numCameras < k_numCameras)
 	{
 		// Clear camera list before releasing system
 		camList.Clear();
@@ -1637,7 +1791,7 @@ int main(int /*argc*/, char** /*argv*/)
 }
 
 
-//winsat disk - drive f
+//winsat disk -drive f
 //Windows System Assessment Tool
 //> Running: Feature Enumeration ''
 //> Run Time 00:00 : 00.00
