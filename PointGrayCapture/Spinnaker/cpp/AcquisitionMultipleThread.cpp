@@ -75,22 +75,26 @@ enum bufferType
 // ==================================== SELECT =======================================
 // ===================================================================================
 const chunkDataType chosenChunkData = IMAGE;
-const PixelFormatEnums savePixelFormat = PixelFormat_BGR8; // PixelFormat_Mono8;
+const PixelFormatEnums savePixelFormat = PixelFormat_RGB8;// PixelFormat_BGR8; // PixelFormat_Mono8;
 const unsigned int numBuffers = 10; // Total number of buffers
 const bufferType chosenBufferType = OldestFirstOverwrite;
 
 const string serialNumberPrimary = "18565847"; // "18566303";
-const gcstring grabPixelFormatName = "BayerBG8"; // BayerBG8
+const gcstring grabPixelFormatName = "BGR8"; // BayerBG8
+
+const ColorProcessingAlgorithm interpolationAlgo = HQ_LINEAR; // WEIGHTED_DIRECTIONAL_FILTER; // DIRECTIONAL_FILTER; // HQ_LINEAR
 
 const int selectFrameRate = 20;
 const videoType chosenVideoType = MJPG; // UNCOMPRESSED;
-const unsigned int k_numImages = 10000;
+const unsigned int k_numImages = 9000;
 const unsigned int k_numPrintInfo = 20;
 
 // const unsigned int k_savePerNumImages = 100;
 // const unsigned int k_threadPerCameraForSaving = 3;
-const unsigned int imageHeight = 1028; //???
+const unsigned int imageHeight = 1024; //???
 const unsigned int imageWidth = 1280;
+
+// const float gainSet = 6.8;
 
 const int k_numCameras = 6;
 const string serialNumbers[k_numCameras] = {
@@ -112,7 +116,21 @@ const string outputFolders[k_numCameras] = {
 	"K:\\temp\\test_sync\\"
 };
 
-const string subfolderName = "022219_0005_test10000frames";
+const string subfolderName = "022819_calib_pointgrey";
+// ===================================================================================
+// add ctrl c handle
+volatile bool is_running = true;
+
+BOOL WINAPI CtrlCHandler(DWORD fdwCtrlType) 
+{
+	if (fdwCtrlType == CTRL_C_EVENT) {
+		is_running = false;
+		cout << "End Capture" << endl;
+		return true;
+	}
+	return false;
+}
+
 // ===================================================================================
 
 
@@ -840,16 +858,18 @@ int ConfigureCustomImageSettings(INodeMap & nodeMap)
 				// Set integer as new value for enumeration node
 				ptrPixelFormat->SetIntValue(pixelFormatSelect);
 
-				cout << "Pixel format set to " << ptrPixelFormat->GetCurrentEntry()->GetSymbolic() << "..." << endl;
+				cout << "Pixel format set to " << ptrPixelFormat->GetCurrentEntry()->GetSymbolic() << "..." << "\n";
 			}
 			else
 			{
 				cout << "Pixel specific format not available..." << endl;
+				return -1;
 			}
 		}
 		else
 		{
 			cout << "Pixel format not available..." << endl;
+			return -1;
 		}
 
 		//==========================================================================
@@ -908,6 +928,10 @@ int ConfigureCustomImageSettings(INodeMap & nodeMap)
 		// there is no reason to check against the increment.
 		//
 
+		//Set to bayer (raw) pixel format 
+		//Set to a RG color space if you want to enable onboard color processing 
+		
+
 
 		CIntegerPtr ptrWidth = nodeMap.GetNode("Width");
 		if (IsAvailable(ptrWidth) && IsWritable(ptrWidth))
@@ -916,11 +940,12 @@ int ConfigureCustomImageSettings(INodeMap & nodeMap)
 
 			ptrWidth->SetValue(widthToSet);
 
-			cout << "Width set to " << ptrWidth->GetValue() << "..." << endl;
+			cout << "Width set to " << ptrWidth->GetValue() << "..." << "\n";
 		}
 		else
 		{
 			cout << "Width not available..." << endl;
+			return -1;
 		}
 
 
@@ -940,13 +965,141 @@ int ConfigureCustomImageSettings(INodeMap & nodeMap)
 
 			ptrHeight->SetValue(heightToSet);
 
-			cout << "Height set to " << ptrHeight->GetValue() << "..." << endl << endl;
+			cout << "Height set to " << ptrHeight->GetValue() << "... \n";
 		}
 		else
 		{
-			cout << "Height not available..." << endl << endl;
+			cout << "Height not available..." << endl;
+			return -1;
 		}
 
+		//==========================================================================
+		//Enabling Auto White Balance setting limits and damping constant. 
+		CEnumerationPtr ptrBalanceWhiteAuto = nodeMap.GetNode("BalanceWhiteAuto");
+
+		if (IsAvailable(ptrBalanceWhiteAuto) && IsWritable(ptrBalanceWhiteAuto)) {
+
+			CEnumEntryPtr ptrBalanceWhiteAutoEntry = ptrBalanceWhiteAuto->GetEntryByName("Off");
+
+			if (IsAvailable(ptrBalanceWhiteAutoEntry) && IsReadable(ptrBalanceWhiteAutoEntry)) {
+				ptrBalanceWhiteAuto->SetIntValue(ptrBalanceWhiteAutoEntry->GetValue());
+				cout << "White balance turn auto off..." << "\n";
+			}
+			else 
+			{
+				cout << "White Balance Auto Off not available ..." << endl;
+				return -1;
+			}
+		}
+		else 
+		{
+			cout << "Balance White Auto not available ... " << endl;
+			return -1;
+		}
+
+		//************************************************************************
+		// default enabled if using BGR8
+		if (grabPixelFormatName == "BGR8") 
+		{
+			cout << "default enabled if using BGR8 \n" << endl;
+		}
+		else 
+		{
+			CBooleanPtr ptrIspEnable = nodeMap.GetNode("IspEnable");
+
+			// if (IsAvailable(ptrIspEnable) && IsWritable(ptrIspEnable)) {
+			if (!IsAvailable(ptrIspEnable))
+			{
+				cout << "ISP Enable not avalibale" << endl;
+				return -1;
+			}
+			else if (!IsWritable(ptrIspEnable))
+			{
+				cout << "ISP Enable not writable" << endl;
+				return -1;
+			}
+			else {
+				ptrIspEnable->SetValue(1);
+				cout << "ISP is enabled" << "\n";
+			}
+		}
+		//************************************************************************
+		// First enable color transformation
+		// Green room set to be cool environment setting
+
+		CBooleanPtr ptrColorTransformEnable = nodeMap.GetNode("ColorTransformationEnable");
+
+		if (IsAvailable(ptrColorTransformEnable) && IsWritable(ptrColorTransformEnable)) {
+			ptrColorTransformEnable->SetValue(1);
+			cout << "Color transformation is enabled." << endl;
+		}
+		else 
+		{
+			cout << "Color transformation not available..." << endl;
+			return -1;
+		}
+
+		//************************************************************************
+		// Green room set to be cool environment setting
+		CEnumerationPtr ptrRgbTransformLightSource = nodeMap.GetNode("RgbTransformLightSource");
+
+		if (IsAvailable(ptrRgbTransformLightSource) && IsWritable(ptrRgbTransformLightSource)) {
+
+			CEnumEntryPtr ptrRgbTransformationLightSourceCool = ptrRgbTransformLightSource->
+				GetEntryByName("CoolFluorescent4000K");//WarmFluorescent3000K
+			
+			if (IsAvailable(ptrRgbTransformationLightSourceCool) && IsReadable(ptrRgbTransformationLightSourceCool)) {
+				ptrRgbTransformLightSource->SetIntValue(ptrRgbTransformationLightSourceCool->GetValue());
+				cout << "Rgb Transfomation from light source: changed to CoolFluorescent4000K..." << endl << endl;
+			}
+			else 
+			{
+				cout << "RgbTransformLightSource  CoolFluorescent4000K not availble ... " << endl;
+				return -1;
+			}
+		}
+		else 
+		{
+			cout << "Rgb Transform Light Source not available ... " << endl;
+			return -1;
+		}
+
+	
+
+		// 
+		/* 
+		CEnumerationPtr ptrGainAuto = nodeMap.GetNode("GainAuto");
+		CEnumEntryPtr ptrGainAutoCts = ptrGainAuto->GetEntryByName("Off");
+		ptrGainAuto->SetIntValue(ptrGainAutoCts->GetValue());
+		cout << "Gain auto off..." << endl << endl;
+
+		CFloatPtr ptrGain = nodeMap.GetNode("Gain");
+		ptrGain->SetValue(gainSet);
+		cout << "Width set to " << ptrGain->GetValue() << "..." << endl;
+		*/
+		
+		//==========================================================================
+		// Change light mode to front light 
+		/*
+		CEnumerationPtr ptrLightingMode = nodeMap.GetNode("AutoExposureLightingMode");
+		if (IsAvailable(ptrLightingMode) && IsWritable(ptrLightingMode)) {
+			
+			CEnumEntryPtr ptrLightModeFrontlight = ptrLightingMode->GetEntryByName("Frontlight");
+			if (IsAvailable(ptrLightModeFrontlight) && IsReadable(ptrLightModeFrontlight)) {
+
+				ptrLightingMode->SetIntValue(ptrLightModeFrontlight);
+				cout << "Lighting Mode set to " << ptrLightModeFrontlight->GetSymbolic() << endl;
+			}
+			else {
+				cout << "Lighting Mode Frontlight not availble..." << endl;
+				return -1;
+			}
+		}
+		else {
+			cout << "Lighting Mode not availble..." << endl;
+			return -1;
+		}
+		*/
 	}
 	catch (Spinnaker::Exception &e)
 	{
@@ -1020,10 +1173,11 @@ int ConfigureVideoAndOpen(SpinVideo & video, INodeMap & nodeMap, INodeMap & node
 			break;
 
 		case MJPG:
-			videoFilename += "SaveToAvi-MJPG";
+			videoFilename += "";
 			if (deviceSerialNumber != "")
 			{
-				videoFilename = videoFilename + "-" + deviceSerialNumber.c_str();
+				// videoFilename = videoFilename + "-" + deviceSerialNumber.c_str();
+				videoFilename = videoFilename + deviceSerialNumber.c_str();
 			}
 
 			break;
@@ -1388,10 +1542,6 @@ void* AcquireImages(void* arg)
 		// Initialize camera
 		pCam->Init();
 
-		// Configure custom image settings
-		err = ConfigureCustomImageSettings(pCam->GetNodeMap());
-		if (err < 0) return err;
-
 		// Configure chuck data setting
 		err = ConfigureChunkData(pCam->GetNodeMap());
 		// pCam->TimestampReset();
@@ -1479,6 +1629,12 @@ void* AcquireImages(void* arg)
 
 
 		//=================================================================================
+		// Configure custom image settings
+		err = ConfigureCustomImageSettings(pCam->GetNodeMap());
+		if (err < 0) return err;
+
+
+		//=================================================================================
 		// Begin acquiring images
 		pCam->BeginAcquisition();
 
@@ -1528,14 +1684,15 @@ void* AcquireImages(void* arg)
 				}
 				else
 				{
-					// ImagePtr convertedImage = pResultImage->Convert(savePixelFormat, HQ_LINEAR);
+					// ImagePtr convertedImage = pResultImage->Convert(savePixelFormat, interpolationAlgo);
 					ImagePtr convertedImage = pResultImage;
 
 					//=============================
 					// Save to an image file
+					
 					/*
 					// Create a unique filename
-					string filename = "imgs/";
+					string filename = outputFolder;
 
 					if (serialNumber != "") {
 					filename += serialNumber.c_str();
@@ -1544,10 +1701,10 @@ void* AcquireImages(void* arg)
 					char buffer[256]; sprintf(buffer, "%06d", imageCnt);
 					string img_id(buffer);
 					filename +=  "/img_" +  img_id +  ".jpg";
-					*/
+					
 					// Save image
-					// convertedImage->Save(filename.str().c_str());
-
+					convertedImage->Save(filename.c_str());
+					*/
 					// Append image to video
 					video.Append(convertedImage);
 
@@ -1574,6 +1731,8 @@ void* AcquireImages(void* arg)
 
 				cout << "[" << serialNumber << "] " << "Error: " << e.what() << endl;
 			}
+
+			if (!is_running) break;
 		}
 
 		// End acquisition
@@ -1720,6 +1879,13 @@ int main(int /*argc*/, char** /*argv*/)
 	// Since this application saves images in the current folder
 	// we must ensure that we have permission to write to this folder.
 	// If we do not have permission, fail right away.
+
+	if (!SetConsoleCtrlHandler(CtrlCHandler, TRUE))
+	{
+		cout << "Cannot set the ctrl+c handler" << endl;
+		return 1;
+	}
+
 	FILE *tempFile = fopen("test.txt", "w+");
 	if (tempFile == NULL)
 	{
